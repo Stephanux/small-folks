@@ -103,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Serveur Tide ──────────────────────────────────────────────────────────
     let mut app = tide::with_state(state);
+    tide::log::start();
     app.with(tide::log::LogMiddleware::new());
 
     // Route de santé (hors dispatcher)
