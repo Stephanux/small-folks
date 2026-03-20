@@ -1,4 +1,4 @@
-use handlebars::{DirectorySourceOptions, Handlebars};
+use handlebars::{DirectorySourceOptionsBuilder, Handlebars};
 use plugin_core::{ActionContext, AppState, Plugin, PluginResult};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -38,10 +38,10 @@ impl Dispatcher {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut hbs = Handlebars::new();
         // Charge tous les .hbs du répertoire templates/
-        let opts = DirectorySourceOptions {
-            tpl_extension: ".hbs".to_string(),
-            ..Default::default()
-        };
+        let opts = DirectorySourceOptionsBuilder::default()
+            .tpl_extension(".hbs")
+            .build()
+            .unwrap();
         hbs.register_templates_directory(templates_dir, opts)?;
         hbs.set_strict_mode(false);
 
