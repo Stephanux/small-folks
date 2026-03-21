@@ -1,6 +1,6 @@
-# rust-plugin-tide v3 — Framework MVC piloté par configuration
+# rust+plugin+tide = Small-Folks —> Framework MVC piloté par configuration
 
-Serveur web Tide modulaire en Rust, où **routes, requêtes SQL et vues sont
+Utilisation du serveur web Tide modulaire en Rust, où **les routes, les requêtes SQL et lesvues sont
 entièrement configurées dans `config_actions.json`** sans recompilation.
 
 ## Architecture
