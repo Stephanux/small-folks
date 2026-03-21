@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<head>
+  <link rel="stylesheet" href="https://cdn.datatables.net/2.3.7/css/dataTables.dataTables.css" />
+  <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+  <script src="https://cdn.datatables.net/2.3.7/js/dataTables.js"></script>
+</head>
+<div class="inputbox">
+  <table id="data" class="display" style="width:100%">
+  <thead>
+    <tr> 
+         {{#each this.0}} {{!-- on utilise le premier élément pour parcourir les champs de l'objet json --}}
+            <th>{{@key}}</th>
+         {{/each}}
+    </tr>
+  </thead>
+  <tbody>
+  {{#each this}}
+    <tr>
+      {{#each this}}
+        <td>{{this}}</td>  <!-- permet de récupérer la valeur du champ de l'objet JSON -->
+      {{/each}}
+    </tr>
+  {{/each}}
+  </tbody>  
+  </table>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    let table = new DataTable('#data');
+});
+</script>
+</html>

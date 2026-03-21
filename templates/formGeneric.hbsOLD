@@ -1,0 +1,64 @@
+<div class="center" style="padding-top: 4px;padding-bottom: 4px;">
+    <h1> Express App : {{title}}</h1>
+    <div class="container">
+        <form method="POST" action="{{form_action}}" id="formAdd">
+            {{#each data}}     
+                {{!-- trouver le moyen de tester si clé externe pour afficher une lite déroulante variable fkey dans annuaire acitons--}}
+                {{#compare @key ../alias_fkey operator="!="}}  {{!--Est-ce que le nomm du champ (@key) est différent du paramètre fkey du config_actions.json --}}
+                        {{#startwith "id" @key}}  {{!--si le champ commence par 'id_' alors on ne l'affiche pas dans le formulaire --}}
+                            
+                        {{else}}    
+                             <div class="inputbox">
+                                {{#compare ../type_form "create" operator="==="}}
+                                    <input type="text" name="{{@key}}" id="{{@key}}" value="" class="form-control" />
+                                {{else}}
+                                    <input type="text" name="{{@key}}" id="{{@key}}" value="{{this}}" class="form-control" />
+                                {{/compare}}
+                                <span>{{@key}}</span>
+                            </div><br>
+                        {{/startwith}}
+                {{else}}   
+                    <div class="inputbox">
+                        {{#compare ../type_form "create" operator="==="}}  {{!--si l'action du form commence par 'create' alors on affiche datalistGeneric sinon comboboxGeneric --}}
+                            {{> components/datalistGeneric data=../datas fkey=../fkey fkid=.}}
+                        {{else}}    
+                            {{> components/comboboxGeneric data=../datas fkey=../fkey fkid=.}} 
+                        {{/compare}}
+                        <span>{{../liste_name}}</span>
+                    </div>
+                {{/compare}}
+            {{/each}}
+            {{!-- Intégration du composant liste de sélection case à cocher générique : checkboxGeneric --}}
+            {{!--> components/checkboxGeneric--}}  {{!-- Mise en commentaire du composant checkboxGeneric --}}
+            <table class="center">
+                <tr>
+                    <td>
+                        <div class="inputbox">
+                            <button>Confirmer la {{libelle}}</button>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="inputbox">
+                            <button value="" type="button" id="delbtn" class="button">Supprimer {{del_label}}</button>
+                        </div>
+                    </td>
+                </tr>
+            </table>
+        </form>
+    </div>
+</div>
+{{!-- Script de validation du formulaire de modification --}}
+<script>
+    //var list_formateurs = {{liste}};
+    var form = document.getElementById('formAdd');
+    var id="{{label_id}}";
+    form.addEventListener('submit', function (evt) {
+        var actionPost = "/" + form.action.split('/')[3];
+        if (actionPost == "{{form_action}}") form.action += "/"+document.URL.split('/')[4];
+        form.submit();
+    });
+    var btn_del = document.getElementById('delbtn');
+    btn_del.addEventListener('click', function (evt) {
+        window.location = "/{{btn_del_action}}/"+document.URL.split('/')[4];
+    });
+</script>

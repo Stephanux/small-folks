@@ -7,8 +7,8 @@
     },
     "GET/countries": {
         "plugin": "./target/debug/libplugin_countries.so",
-        "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",
-        "view": "tableau.hbs",
+        "sql": "SELECT code, name_us, name_fr, region FROM countries ORDER BY name_us",
+        "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/countries": {
@@ -57,7 +57,7 @@
     "GET/regions": {
         "plugin": "./target/debug/libplugin_regions.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, COUNT(*) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
-        "view": "tableau.hbs",
+        "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/regions": {

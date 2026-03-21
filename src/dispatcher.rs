@@ -18,6 +18,7 @@ pub struct ActionConfig {
     pub return_type: Option<String>,
     /// URL de redirection (pour return_type = "redirect")
     pub redirect_to: Option<String>,
+
 }
 
 /// Dispatcher central : résout chaque requête HTTP via config_actions.json
@@ -154,7 +155,7 @@ impl Dispatcher {
         } else {
             serde_json::Value::Null
         };
-
+        
         // ── 5. Rendu selon return_type ────────────────────────────────────────
         match ctx.return_type.as_str() {
             "json" => {
