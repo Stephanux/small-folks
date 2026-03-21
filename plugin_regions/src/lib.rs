@@ -30,8 +30,8 @@ impl Plugin for PluginRegions {
                                     let val: Option<String> = row.try_get(i).ok();
                                     obj.insert(
                                         col.name().to_string(),
-                                        val.map(serde_json::Value::String)
-                                            .unwrap_or(serde_json::Value::Null),
+                                        val.map(serde_json::Value::String) // NB: Les données en sortie de SQL doivent être des "CHAR"
+                                            .unwrap_or(serde_json::Value::Null),  // sinon on affecte Null à la valeur en sortie vers Handlebars
                                     );
                                 }
                                 serde_json::Value::Object(obj)
