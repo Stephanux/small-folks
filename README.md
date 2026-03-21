@@ -31,6 +31,8 @@ HTTP GET /countries/FR
   ↓ plugin.execute(ctx, state) → SQL "SELECT ... WHERE code = ?" avec bind("FR")
   ↓ return_type = "html" → render("tableau.hbs", data)
   ↓ HTTP 200 text/html
+
+![alt Schéma architecture]'https://mascaron.net/architecture_rust_plugin_tide.png)
 ```
 
 ## config_actions.json — Structure d'une action
