@@ -56,13 +56,13 @@
     },
     "GET/regions": {
         "plugin": "./target/debug/libplugin_regions.so",
-        "sql": "SELECT COALESCE(region, 'Unknown') AS region, COUNT(*) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
+        "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/regions": {
         "plugin": "./target/debug/libplugin_regions.so",
-        "sql": "SELECT COALESCE(region, 'Unknown') AS region, COUNT(*) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
+        "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
         "view": "",
         "return_type": "json"
     },
