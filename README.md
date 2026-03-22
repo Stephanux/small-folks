@@ -9,7 +9,7 @@ entièrement configurées dans `config_actions.json`** sans recompilation.
 rust-plugin-tide/
 ├── config_actions.json   ← annuaire des routes (SQL + plugin + vue + return_type)
 ├── templates/            ← vues Handlebars (.hbs)
-│   ├── tableau.hbs
+│   ├── tableGeneric.hbs
 │   ├── error.hbs
 │   └── success.hbs
 ├── plugin-core/          ← traits Plugin, ActionContext, PluginResult
