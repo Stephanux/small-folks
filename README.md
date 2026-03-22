@@ -6,7 +6,7 @@ entièrement configurées dans `config_actions.json`** sans recompilation.
 ## Architecture
 
 ```
-rust-plugin-tide/
+small-folks/
 ├── config_actions.json   ← annuaire des routes (SQL + plugin + vue + return_type)
 ├── templates/            ← vues Handlebars (.hbs)
 │   ├── tableGeneric.hbs
