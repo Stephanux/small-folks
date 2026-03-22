@@ -29,7 +29,7 @@ HTTP GET /countries/FR
   ↓ extrait params : { code: "FR" }
   ↓ charge plugin "countries" (précaché)
   ↓ plugin.execute(ctx, state) → SQL "SELECT ... WHERE code = ?" avec bind("FR")
-  ↓ return_type = "html" → render("tableau.hbs", data)
+  ↓ return_type = "html" → render("tableGeneric.hbs", data)
   ↓ HTTP 200 text/html
 ```
 ![alt Schéma architecture](https://mascaron.net/architecture_rust_plugin_tide.png)
@@ -41,7 +41,7 @@ HTTP GET /countries/FR
 "GET/countries/:code": {
     "plugin":      "./target/debug/libplugin_countries.so",
     "sql":         "SELECT code, name_us, name_fr FROM countries WHERE code = :code",
-    "view":        "tableau.hbs",
+    "view":        "tableGeneric.hbs",
     "return_type": "html"
 }
 ```
