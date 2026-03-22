@@ -2,7 +2,7 @@
 members = [
     ".",
     "plugin-core",
-    "plugin_countries",
+    "plugin_sql",
     "plugin_regions",
 ]
 

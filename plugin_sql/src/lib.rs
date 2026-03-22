@@ -5,7 +5,7 @@ pub struct PluginCountries;
 
 impl Plugin for PluginCountries {
     fn name(&self) -> &'static str {
-        "countries"
+        "sql"
     }
 
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
