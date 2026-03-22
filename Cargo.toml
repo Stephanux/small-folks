@@ -3,7 +3,6 @@ members = [
     ".",
     "plugin-core",
     "plugin_sql",
-    "plugin_regions",
 ]
 
 [package]
