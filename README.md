@@ -1,6 +1,7 @@
-# rust+plugins system+tide+handlebars = Small-Folks —> Framework MVC piloté par configuration (automate fini)
+# Small-Folks —> Framework MVC piloté par configuration (automate fini)
+# Rust + Système de plugins + Tide + Handlebars + Json
 
-Utilisation du serveur web Tide modulaire en Rust, où **les routes, les requêtes SQL et les vues sont
+Utilisation du serveur web Tide écrit en Rust, dans Small-Folks on a : **les routes, les requêtes SQL et les vues qui sont
 entièrement configurées dans `config_actions.json`** sans recompilation.
 
 ## Architecture
