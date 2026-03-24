@@ -26,7 +26,7 @@
     "GET/countries/:code": {
         "plugin": "./target/debug/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE code=:code",
-        "view": "tableau.hbs",
+        "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/countries/:code": {
@@ -45,7 +45,7 @@
 	"POST/delete_country": {
         "plugin": "./target/debug/libplugin_sql.so",
 		"sql": "delete from countries where code=:code",
-		"view": "tableau_html.hbs"
+		"view": "tableGeneric.hbs"
 	},
     "PUT/countries/:code": {
         "plugin": "./target/debug/libplugin_sql.so",
@@ -75,7 +75,7 @@
     "GET/regions/:name": {
         "plugin": "./target/debug/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE region = :name ORDER BY name_us",
-        "view": "tableau.hbs",
+        "view": "tableGeneric.hbs",
         "return_type": "html"
     }
 }
