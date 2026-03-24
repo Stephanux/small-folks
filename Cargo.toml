@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    ".",
+    ".", "mongodb_test",
     "plugin-core",
     "plugin_sql",
 ]

@@ -1,0 +1,25 @@
+<div class="inputbox">
+  <table id="example" class="display" style="width:100%">
+  <thead>
+    <tr> 
+         {{#each tab_columns}}  {{!-- tab_columns paramètre à ajouter dans l'action du config_actions.json pour affichage des titres des colonnes--}}
+            <th>{{@key}}</th>
+         {{/each}}
+    </tr>
+  </thead>
+  <tbody>
+  {{#each data}}
+    <tr>
+      {{#each this}}
+        <td>{{this}}</td>  <!-- normalement "." mais avec Rust ça compile pas ?  permet de récupérer la valeur du champ de l'objet JSON -->
+      {{/each}}
+    </tr>
+  {{/each}}
+  </tbody>  
+  </table>
+</div>
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    let table = new DataTable('#example');
+});
+</script>
