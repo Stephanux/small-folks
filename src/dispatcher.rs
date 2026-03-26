@@ -140,7 +140,11 @@ impl Dispatcher {
                     Some(plugin) => {
                         let state = req.state().clone();
                         match plugin.execute(&ctx, &state) {
-                            PluginResult::Data(v)  => v,
+                            PluginResult::Data(v)  => {
+                                // on affiche le retour du plugin dans la console.
+                                println!("Retour requête plugin : {:?}", v);
+                                v    
+                            },
                             PluginResult::Error(e) => {
                                 eprintln!("[dispatcher] Plugin error: {}", e);
                                 return self.render_error(500, &e);

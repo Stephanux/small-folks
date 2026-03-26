@@ -81,7 +81,7 @@ async fn op_find_one(coll: Collection<Document>, filter_str: &str) -> PluginResu
         Ok(f)  => f,
         Err(e) => return PluginResult::Error(e),
     };
-
+    println!("le filter de find_one : {:?}", filter);
     match coll.find_one(filter).await {
         Ok(Some(doc)) => PluginResult::Data(doc_to_json(doc)),
         Ok(None)      => PluginResult::Data(Value::Null),
