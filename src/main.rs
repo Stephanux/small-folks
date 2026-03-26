@@ -2,6 +2,7 @@ mod dispatcher;
 
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};
+use mongodb::bson;
 use plugin_core::{AppState, Plugin, PluginRegistrar};
 use sqlx::mysql::MySqlPoolOptions;
 use std::collections::HashMap;
@@ -61,8 +62,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     println!("Pool MySQL prêt\n");
 
+    // ── Client MongoDB (facultatif) ───────────────────────────────────────────
+    let mongo: Option<mongodb::Client> = match env::var("MONGODB_URI") {
+        Ok(uri) => {
+            println!("Connexion MongoDB...");
+            match mongodb::Client::with_uri_str(&uri).await {
+                Ok(client) => {
+                    // Ping pour valider la connexion
+                    let db_name = env::var("MONGODB_DB")
+                        .unwrap_or_else(|_| "test".to_string());
+                    match client.database(&db_name)
+                        .run_command(bson::doc! { "ping": 1 }).await
+                    {
+                        Ok(_)  => { println!("Client MongoDB prêt\n"); Some(client) }
+                        Err(e) => {
+                            eprintln!("MongoDB ping échoué : {} (MongoDB désactivé)\n", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Connexion MongoDB échouée : {} (MongoDB désactivé)\n", e);
+                    None
+                }
+            }
+        }
+        Err(_) => {
+            println!("MONGODB_URI absent — MongoDB désactivé\n");
+            None
+        }
+    };
+
     let handle = Handle::current();
-    let state  = AppState { pool, handle };
+    let state  = AppState { pool, handle, mongo };
 
     // ── Précache des plugins au démarrage ────────────────────────────────────
     // On collecte les chemins uniques de plugins référencés dans le JSON

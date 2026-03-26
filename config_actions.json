@@ -77,5 +77,40 @@
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE region = :name ORDER BY name_us",
         "view": "tableGeneric.hbs",
         "return_type": "html"
+    },
+
+    "GET/api/mongo/countries": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{}",
+        "operation": "find",
+        "return_type": "json"
+    },
+    "GET/api/mongo/countries/:id": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{\"_id\": \":id\"}",
+        "operation": "find_one",
+        "return_type": "json"
+    },
+    "POST/api/mongo/countries": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "operation": "insert_one",
+        "return_type": "json"
+    },
+    "PUT/api/mongo/countries/:id": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{\"_id\": \":id\"}",
+        "operation": "update_one",
+        "return_type": "json"
+    },
+    "DELETE/api/mongo/countries/:id": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{\"_id\": \":id\"}",
+        "operation": "delete_one",
+        "return_type": "json"
     }
 }

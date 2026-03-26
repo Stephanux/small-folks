@@ -6,6 +6,8 @@ use tokio::runtime::Handle;
 pub struct AppState {
     pub pool:   MySqlPool,
     pub handle: Handle,
+    pub mongo:  Option<mongodb::Client>,
+
 }
 
 /// Contexte d'action injecté par le dispatcher dans chaque plugin.
@@ -15,6 +17,9 @@ pub struct AppState {
 pub struct ActionContext {
     /// Requête SQL lue depuis config_actions.json (avec params nommés :param)
     pub sql:         String,
+    pub collection:  String,
+    pub filter:      String,
+    pub operation:   String,
     /// Paramètres nommés extraits de l'URL ou du body (:code, :name_us, ...)
     pub params:      std::collections::HashMap<String, String>,
     /// Nom du template Handlebars à utiliser (vide si return_type = json)

@@ -8,17 +8,17 @@ use tide::{Request, Response};
 /// Structure d'une action dans config_actions.json
 #[derive(Debug, Deserialize, Clone)]
 pub struct ActionConfig {
-    /// Chemin vers le .so du plugin (optionnel pour les routes sans plugin)
     pub plugin:      Option<String>,
-    /// Requête SQL avec paramètres nommés (:param)
+    // MySQL
     pub sql:         Option<String>,
-    /// Template Handlebars à utiliser
+    // MongoDB
+    pub collection:  Option<String>,
+    pub filter:      Option<String>,
+    pub operation:   Option<String>,
+    // Rendu
     pub view:        Option<String>,
-    /// Type de retour : "json", "html", "redirect"
     pub return_type: Option<String>,
-    /// URL de redirection (pour return_type = "redirect")
     pub redirect_to: Option<String>,
-
 }
 
 /// Dispatcher central : résout chaque requête HTTP via config_actions.json
@@ -116,9 +116,12 @@ impl Dispatcher {
             }
         }
 
-        // ── 3. Construction du ActionContext ─────────────────────────────────
+        // ── Construction du ActionContext ─────────────────────────────────────
         let ctx = ActionContext {
             sql:         action.sql.clone().unwrap_or_default(),
+            collection:  action.collection.clone().unwrap_or_default(),
+            filter:      action.filter.clone().unwrap_or_else(|| "{}".to_string()),
+            operation:   action.operation.clone().unwrap_or_else(|| "find".to_string()),
             params,
             view:        action.view.clone().unwrap_or_default(),
             return_type: action.return_type.clone().unwrap_or_else(|| "json".to_string()),
