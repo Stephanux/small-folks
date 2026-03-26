@@ -24,9 +24,12 @@ async fn main() -> mongodb::error::Result<()> {
         .database("r310")
         .collection("countries");
     let mut result = my_coll.find(doc! {}).await?;
-    println!("{:#?}", result);
+    //println!("{:#?}", result);
     while result.advance().await? {
-        println!("{:?}", result.deserialize_current()?);
+        let record =  result.deserialize_current()?;
+        println!("_id : {:?}", record._id);
+        println!("name : {:?}", record.name);
+        println!("code : {:?}", record.code);
     }
     Ok(())
 }

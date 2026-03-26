@@ -3,6 +3,7 @@ mod dispatcher;
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};
 use mongodb::bson;
+use mongodb::options::{AuthMechanism, ClientOptions, Credential};
 use plugin_core::{AppState, Plugin, PluginRegistrar};
 use sqlx::mysql::MySqlPoolOptions;
 use std::collections::HashMap;
@@ -63,33 +64,75 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Pool MySQL prêt\n");
 
     // ── Client MongoDB (facultatif) ───────────────────────────────────────────
+    // Variables .env :
+    //   MONGODB_URI  = mongodb://localhost:27017   (obligatoire pour activer MongoDB)
+    //   MONGODB_DB   = mydb                        (base de données cible)
+    //   MONGODB_USER = monUser                     (optionnel)
+    //   MONGODB_PASS = monMotDePasse               (optionnel)
+    //   MONGODB_AUTH_DB = admin                    (base d'auth, défaut : "admin")
     let mongo: Option<mongodb::Client> = match env::var("MONGODB_URI") {
-        Ok(uri) => {
-            println!("Connexion MongoDB...");
-            match mongodb::Client::with_uri_str(&uri).await {
-                Ok(client) => {
-                    // Ping pour valider la connexion
-                    let db_name = env::var("MONGODB_DB")
-                        .unwrap_or_else(|_| "test".to_string());
-                    match client.database(&db_name)
-                        .run_command(bson::doc! { "ping": 1 }).await
-                    {
-                        Ok(_)  => { println!("Client MongoDB prêt\n"); Some(client) }
-                        Err(e) => {
-                            eprintln!("MongoDB ping échoué : {} (MongoDB désactivé)\n", e);
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Connexion MongoDB échouée : {} (MongoDB désactivé)\n", e);
-                    None
-                }
-            }
-        }
         Err(_) => {
             println!("MONGODB_URI absent — MongoDB désactivé\n");
             None
+        }
+        Ok(uri) => {
+            println!("Connexion MongoDB...");
+
+            // Parse l'URI en ClientOptions pour pouvoir y injecter les credentials
+            match ClientOptions::parse(&uri).await {
+                Err(e) => {
+                    eprintln!("URI MongoDB invalide : {} (MongoDB désactivé)\n", e);
+                    None
+                }
+                Ok(mut opts) => {
+                    // Injection des credentials si MONGODB_USER est défini
+                    if let Ok(user) = env::var("MONGODB_USER") {
+                        let pass    = env::var("MONGODB_PASS").unwrap_or_default();
+                        let auth_db = env::var("MONGODB_AUTH_DB")
+                            .unwrap_or_else(|_| "admin".to_string());
+
+                        // SCRAM-SHA-256 est le mécanisme recommandé depuis MongoDB 4.0
+                        let credential = Credential::builder()
+                            .username(user.clone())
+                            .password(pass)
+                            .source(auth_db.clone())        // base d'authentification
+                            .mechanism(AuthMechanism::ScramSha256)
+                            .build();
+
+                        opts.credential = Some(credential);
+                        println!("  -> Authentification : user='{}' auth_db='{}'",
+                            user, auth_db);
+                    } else {
+                        println!("  -> Connexion sans authentification");
+                    }
+
+                    match mongodb::Client::with_options(opts) {
+                        Err(e) => {
+                            eprintln!("Création client MongoDB échouée : {} (MongoDB désactivé)\n", e);
+                            None
+                        }
+                        Ok(client) => {
+                            // Ping sur la base cible pour valider la connexion ET les droits
+                            let db_name = env::var("MONGODB_DB")
+                                .unwrap_or_else(|_| "test".to_string());
+                            match client
+                                .database(&db_name)
+                                .run_command(bson::doc! { "ping": 1 })
+                                .await
+                            {
+                                Ok(_) => {
+                                    println!("Client MongoDB prêt (db='{}')\n", db_name);
+                                    Some(client)
+                                }
+                                Err(e) => {
+                                    eprintln!("MongoDB ping échoué : {} (MongoDB désactivé)\n", e);
+                                    None
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     };
 

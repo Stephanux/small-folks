@@ -7,6 +7,7 @@ edition = "2024"
 serde = "1.0.188"
 futures = "0.3.28"
 tokio = {version = "1.32.0", features = ["full"]}
+json_to_struct = "0.1"
 
 [dependencies.mongodb]
 version = "3.5.2"
