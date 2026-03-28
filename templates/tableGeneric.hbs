@@ -1,9 +1,6 @@
-<!DOCTYPE html>
-<head>
-  <link rel="stylesheet" href="https://cdn.datatables.net/2.3.7/css/dataTables.dataTables.css" />
-  <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
-  <script src="https://cdn.datatables.net/2.3.7/js/dataTables.js"></script>
-</head>
+{{> partials/header page_title="Résultats"}}
+{{> partials/nav}}
+<body>
 <div class="inputbox">
   <table id="data" class="display" style="width:100%">
   <thead>
@@ -24,9 +21,5 @@
   </tbody>  
   </table>
 </div>
-<script>
-  document.addEventListener('DOMContentLoaded', function () {
-    let table = new DataTable('#data');
-});
-</script>
-</html>
+{{> partials/footer}}
+

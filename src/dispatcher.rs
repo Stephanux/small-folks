@@ -142,7 +142,7 @@ impl Dispatcher {
                         match plugin.execute(&ctx, &state) {
                             PluginResult::Data(v)  => {
                                 // on affiche le retour du plugin dans la console.
-                                println!("Retour requête plugin : {:?}", v);
+                                //println!("Retour requête plugin : {:?}", v);
                                 v    
                             },
                             PluginResult::Error(e) => {

@@ -1,0 +1,21 @@
+<nav style="background:#2c3e50; padding:.7rem 1.5rem; margin-bottom:1.5rem;">
+  <div style="max-width:1200px; margin:0 auto; display:flex; align-items:center; gap:1.5rem;">
+    <span style="color:#fff; font-weight:700; font-size:1rem;">
+      &#9881; Rust Small-Folks Web Framework
+    </span>
+    <a href="/" style="color:#aec6cf; text-decoration:none; font-size:.9rem;">Accueil</a>
+    <a href="/countries" style="color:#aec6cf; text-decoration:none; font-size:.9rem;">Countries</a>
+    <a href="/regions" style="color:#aec6cf; text-decoration:none; font-size:.9rem;">Regions</a>
+    <a href="/health" style="color:#aec6cf; text-decoration:none; font-size:.9rem;">Health</a>
+    {{#if (lookup @root "nav_extra")}}
+      {{#each (lookup @root "nav_extra")}}
+      <a href="{{url}}" style="color:#aec6cf; text-decoration:none; font-size:.9rem;">
+        {{label}}
+      </a>
+      {{/each}}
+    {{/if}}
+    <span style="margin-left:auto; color:#7f8c8d; font-size:.8rem;">
+      <a href="/api/countries" style="color:#7f8c8d; text-decoration:none;">API</a>
+    </span>
+  </div>
+</nav>

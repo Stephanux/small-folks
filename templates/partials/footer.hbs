@@ -1,0 +1,23 @@
+<footer style="margin-top:2rem; padding:1rem 1.5rem; text-align:center;
+               color:#999; font-size:.8rem; border-top:1px solid #e0e0e0;">
+  Rust Plugin Tide &mdash; framework MVC piloté par config_actions.json
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tables = document.querySelectorAll('table.datatable');
+  tables.forEach(function(t) {
+    new DataTable(t, {
+      pageLength: 25,
+      language: {
+        search:    "Rechercher :",
+        lengthMenu: "Afficher _MENU_ lignes",
+        info:      "Lignes _START_ à _END_ sur _TOTAL_",
+        paginate:  { previous: "Préc.", next: "Suiv." }
+      }
+    });
+  });
+});
+</script>
+</body>
+</html>

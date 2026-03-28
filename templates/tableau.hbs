@@ -1,30 +1,35 @@
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="UTF-8">
-  <title>Liste</title>
-  <style>
-    body { font-family: sans-serif; margin: 2rem; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { border: 1px solid #ccc; padding: 0.5rem 1rem; text-align: left; }
-    th { background: #f0f0f0; }
-    tr:nth-child(even) { background: #fafafa; }
-  </style>
-</head>
-<body>
-  <h1>Résultats</h1>
- <body>
-    <form method="POST" action="/delete_country">
-        <table border=1>
-            <tbody>{{#each this}}<tr>
-                    <td><input type="radio" value="{{this.code}}" name="code"></td>
-                    <td>{{this.code}}</td>
-                    <td>{{this.name_fr}}</td>
-                    <td>{{this.name_us}}</td>
-                    <td><input type="submit" value="Suppr." name="btn_del_{{this.code}}"></td>
-                </tr>{{/each}}</tbody>
-        </table>
-    </form>
-</body>
-</body>
-</html>
+{{> partials/header page_title="Résultats"}}
+{{> partials/nav}}
+
+<div class="container">
+  <div class="card">
+    {{#if page_title}}
+    <h1>{{page_title}}</h1>
+    {{/if}}
+
+    {{#if this}}
+    <table id="data" class="datatable display" style="width:100%">
+      <thead>
+        <tr>
+          {{#each this.0}}
+          <th>{{@key}}</th>
+          {{/each}}
+        </tr>
+      </thead>
+      <tbody>
+        {{#each this}}
+        <tr>
+          {{#each this}}
+          <td>{{this}}</td>
+          {{/each}}
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <p style="color:#888; font-style:italic;">Aucun résultat.</p>
+    {{/if}}
+  </div>
+</div>
+
+{{> partials/footer}}

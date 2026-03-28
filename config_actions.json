@@ -78,7 +78,14 @@
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
-
+    "GET/mongo/countries": {
+        "plugin": "./target/debug/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{}",
+        "operation": "find",
+        "return_type": "html",
+        "view": "tableGeneric.hbs"
+    },
     "GET/api/mongo/countries": {
         "plugin": "./target/debug/libplugin_mongo.so",
         "collection": "countries",
