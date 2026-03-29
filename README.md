@@ -33,7 +33,7 @@ HTTP GET /countries/FR
   ↓ return_type = "html" → render("tableGeneric.hbs", data)
   ↓ HTTP 200 text/html
 ```
-![alt Schéma architecture](https://mascaron.net/architecture_rust_plugin_tide.png)
+![alt Schéma architecture](https://mascaron.net/schema_architecture_Rust_Small-FolksV4.png)
 
 
 ## config_actions.json — Structure d'une action
