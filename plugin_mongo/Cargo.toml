@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 plugin-core = { path = "../plugin-core" }
 futures-util =  { version = "0.3", default-features = false, features = ["alloc"] }
-mongodb     = "^3.2"
+mongodb     = "^3.5"
 bson        = "2"
 tokio       = { version = "1", features = ["rt"] }
 serde       = { version = "1", features = ["derive"] }

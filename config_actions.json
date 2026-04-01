@@ -17,6 +17,12 @@
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
+    "GET/view/countries": {
+        "plugin": "./target/debug/libplugin_sql.so",
+        "sql": "SELECT code, name_us, name_fr, region FROM countries LIMIT 1",
+        "view": "form_countries.hbs",
+        "return_type": "html"
+    },
     "GET/api/countries": {
         "plugin": "./target/debug/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",

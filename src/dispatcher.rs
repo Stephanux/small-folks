@@ -174,7 +174,7 @@ impl Dispatcher {
             }
 
             "html" => {
-                println!("data : {}", data);
+                //println!("data : {}", data);
                 let view_name = ctx.view.trim_end_matches(".hbs");
                 match self.hbs.render(view_name, &data) {
                     Ok(html) => Ok(Response::builder(200)

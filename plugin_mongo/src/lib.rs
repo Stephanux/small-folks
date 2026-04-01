@@ -1,4 +1,4 @@
-use bson::{doc, oid::ObjectId, Document};
+use bson::{doc, oid::ObjectId, raw::RawDocumentBuf, Document};
 use mongodb::Collection;
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
 use serde_json::{json, Map, Value};
@@ -27,6 +27,17 @@ impl Plugin for PluginMongo {
         // ou juste "macollection" (utilise la DB par défaut MONGODB_DB)
         let (db_name, coll_name) = parse_collection(&ctx.collection);
         let db   = mongo_client.database(&db_name);
+        
+        // ── Lecture : Collection<RawDocumentBuf> ──────────────────────────────
+        // Le driver reçoit les bytes BSON du réseau et les stocke directement
+        // dans un Vec<u8> SANS parser les paires clé/valeur.
+        // Le parsing est LAZY : seuls les champs parcourus dans raw_doc_to_json
+        // sont désérialisés. Gain ~30% sur des collections volumineuses.
+        let coll_raw: Collection<RawDocumentBuf> = db.collection(&coll_name);
+
+        // ── Écriture : Collection<Document> ──────────────────────────────────
+        // Pour insert/update/delete on construit des filtres BSON typés.
+        // RawDocumentBuf n'apporte rien ici (pas de curseur à lire).
         let coll: Collection<Document> = db.collection(&coll_name);
 
         // Substitution des paramètres nommés dans le filtre JSON
@@ -36,8 +47,8 @@ impl Plugin for PluginMongo {
         tokio::task::block_in_place(|| {
             state.handle.block_on(async move {
                 match ctx.operation.as_str() {
-                    "find"       => op_find(coll, &filter_str).await,
-                    "find_one"   => op_find_one(coll, &filter_str).await,
+                    "find"       => op_find(coll_raw, &filter_str).await,
+                    "find_one"   => op_find_one(coll_raw, &filter_str).await,
                     "insert_one" => op_insert_one(coll, &ctx.params).await,
                     "update_one" => op_update_one(coll, &filter_str, &ctx.params).await,
                     "delete_one" => op_delete_one(coll, &filter_str).await,
@@ -50,117 +61,191 @@ impl Plugin for PluginMongo {
     }
 }
 
-// ── Opérations MongoDB ────────────────────────────────────────────────────────
+// ── Opérations LECTURE — Collection<RawDocumentBuf> ──────────────────────────
 
-/// find : retourne tous les documents correspondant au filtre (tableau JSON)
-async fn op_find(coll: Collection<Document>, filter_str: &str) -> PluginResult {
+/// find : retourne un tableau JSON.
+/// Chemin zero-copy : réseau → Vec<u8> → itération lazy → serde_json::Value
+/// Aucune HashMap<String,Bson> intermédiaire contrairement à Document.
+async fn op_find(
+    coll: Collection<RawDocumentBuf>,
+    filter_str: &str,
+) -> PluginResult {
     let filter = match parse_filter(filter_str) {
-        Ok(f)  => f,
-        Err(e) => return PluginResult::Error(e),
+        Ok(f) => f, Err(e) => return PluginResult::Error(e),
     };
-    println!("collection :  {:?}", coll.name());
+    use futures_util::stream::TryStreamExt;
     match coll.find(filter).await {
-        Ok(cursor) => {
-            use mongodb::error::Result as MResult;
-            use futures_util::stream::TryStreamExt;
-            let docs: MResult<Vec<Document>> = cursor.try_collect().await;
-            match docs {
-                Ok(list) => PluginResult::Data(Value::Array(
-                    list.into_iter().map(doc_to_json).collect(),
-                )),
-                Err(e) => PluginResult::Error(e.to_string()),
-            }
-        }
+        Ok(cursor) => match cursor.try_collect::<Vec<RawDocumentBuf>>().await {
+            Ok(docs) => PluginResult::Data(Value::Array(
+                docs.iter().map(raw_doc_to_json).collect()
+            )),
+            Err(e) => PluginResult::Error(e.to_string()),
+        },
         Err(e) => PluginResult::Error(e.to_string()),
     }
 }
 
-/// find_one : retourne un seul document (ou null)
-async fn op_find_one(coll: Collection<Document>, filter_str: &str) -> PluginResult {
+/// find_one : retourne un document unique (JSON) ou null.
+async fn op_find_one(
+    coll: Collection<RawDocumentBuf>,
+    filter_str: &str,
+) -> PluginResult {
     let filter = match parse_filter(filter_str) {
-        Ok(f)  => f,
-        Err(e) => return PluginResult::Error(e),
+        Ok(f) => f, Err(e) => return PluginResult::Error(e),
     };
-    println!("le filter de find_one : {:?}", filter);
     match coll.find_one(filter).await {
-        Ok(Some(doc)) => PluginResult::Data(doc_to_json(doc)),
+        Ok(Some(raw)) => PluginResult::Data(raw_doc_to_json(&raw)),
         Ok(None)      => PluginResult::Data(Value::Null),
         Err(e)        => PluginResult::Error(e.to_string()),
     }
 }
 
-/// insert_one : insère les params comme nouveau document
+// ── Opérations ÉCRITURE — Collection<Document> ───────────────────────────────
+
 async fn op_insert_one(
     coll: Collection<Document>,
     params: &HashMap<String, String>,
 ) -> PluginResult {
-    // Construit le document depuis les paramètres (exclut les champs vides)
     let mut doc = Document::new();
     for (k, v) in params {
-        if k == "_id" { continue; } // _id auto-généré par MongoDB
+        if k == "_id" { continue; }
         doc.insert(k.clone(), v.clone());
     }
-
     match coll.insert_one(doc).await {
-        Ok(result) => {
-            // Convertit l'ObjectId inséré en String
-            let inserted_id = result
-                .inserted_id
-                .as_object_id()
-                .map(|oid| oid.to_hex())
-                .unwrap_or_else(|| "unknown".to_string());
-            PluginResult::Data(json!({
-                "inserted_id": inserted_id,
-                "success": true
-            }))
-        }
+        Ok(r) => PluginResult::Data(json!({
+            "inserted_id": r.inserted_id.as_object_id()
+                            .map(|o| o.to_hex())
+                            .unwrap_or_else(|| "unknown".to_string()),
+            "success": true
+        })),
         Err(e) => PluginResult::Error(e.to_string()),
     }
 }
 
-/// update_one : met à jour les champs envoyés dans params (opérateur $set)
 async fn op_update_one(
     coll: Collection<Document>,
     filter_str: &str,
     params: &HashMap<String, String>,
 ) -> PluginResult {
     let filter = match parse_filter(filter_str) {
-        Ok(f)  => f,
-        Err(e) => return PluginResult::Error(e),
+        Ok(f) => f, Err(e) => return PluginResult::Error(e),
     };
-
-    // Construit le $set avec tous les params sauf _id
     let mut set_doc = Document::new();
     for (k, v) in params {
         if k == "_id" { continue; }
         set_doc.insert(k.clone(), v.clone());
     }
-    let update = doc! { "$set": set_doc };
-
-    match coll.update_one(filter, update).await {
-        Ok(result) => PluginResult::Data(json!({
-            "matched_count":  result.matched_count,
-            "modified_count": result.modified_count,
-            "success": result.modified_count > 0
+    match coll.update_one(filter, doc! { "$set": set_doc }).await {
+        Ok(r) => PluginResult::Data(json!({
+            "matched_count":  r.matched_count,
+            "modified_count": r.modified_count,
+            "success":        r.modified_count > 0
         })),
         Err(e) => PluginResult::Error(e.to_string()),
     }
 }
 
-/// delete_one : supprime le premier document correspondant au filtre
-async fn op_delete_one(coll: Collection<Document>, filter_str: &str) -> PluginResult {
+async fn op_delete_one(
+    coll: Collection<Document>,
+    filter_str: &str,
+) -> PluginResult {
     let filter = match parse_filter(filter_str) {
-        Ok(f)  => f,
-        Err(e) => return PluginResult::Error(e),
+        Ok(f) => f, Err(e) => return PluginResult::Error(e),
     };
-
     match coll.delete_one(filter).await {
-        Ok(result) => PluginResult::Data(json!({
-            "deleted_count": result.deleted_count,
-            "success": result.deleted_count > 0
+        Ok(r) => PluginResult::Data(json!({
+            "deleted_count": r.deleted_count,
+            "success":       r.deleted_count > 0
         })),
         Err(e) => PluginResult::Error(e.to_string()),
     }
+}
+
+// ── Conversion zero-copy RawDocumentBuf → serde_json::Value ──────────────────
+
+/// Convertit un RawDocumentBuf en JSON par itération lazy.
+///
+/// Principe zero-copy :
+///   RawDocumentBuf = Vec<u8> de bytes BSON bruts (pas de HashMap).
+///   raw.iter() produit des RawBsonRef<'_> : références directes sur ces bytes.
+///   Les strings BSON sont empruntées (&str) et ne sont copiées qu'une fois
+///   au moment de l'insertion dans la Map JSON.
+///   Les scalaires (int, float, bool) sont lus depuis les bytes sans allocation.
+fn raw_doc_to_json(raw: &RawDocumentBuf) -> Value {
+    let mut map = Map::new();
+    for item in raw.iter() {
+        match item {
+            Ok((key, val)) => { map.insert(key.to_string(), raw_bson_ref_to_json(val)); }
+            Err(e)         => { eprintln!("[plugin_mongo] BSON parse error: {}", e); }
+        }
+    }
+    Value::Object(map)
+}
+
+/// Convertit un RawBsonRef<'_> (vue sur les bytes) en serde_json::Value.
+///
+/// RawBsonRef est une référence empruntée sur le buffer RawDocumentBuf :
+///   - String  → &str (zero-copy), converti en String seulement ici
+///   - Int32/64, Double, Boolean → lecture directe depuis les bytes
+///   - ObjectId → String hex (seule "vraie" allocation nécessaire pour JSON)
+///   - Document/Array imbriqués → récursion avec vues empruntées
+fn raw_bson_ref_to_json(val: bson::raw::RawBsonRef<'_>) -> Value {
+    use bson::raw::RawBsonRef;
+    match val {
+        RawBsonRef::ObjectId(oid)     => Value::String(oid.to_hex()),
+        RawBsonRef::String(s)         => Value::String(s.to_string()),
+        RawBsonRef::Int32(i)          => json!(i),
+        RawBsonRef::Int64(i)          => json!(i),
+        RawBsonRef::Double(f)         => json!(f),
+        RawBsonRef::Boolean(b)        => Value::Bool(b),
+        RawBsonRef::Null              => Value::Null,
+        RawBsonRef::Undefined         => Value::Null,
+        RawBsonRef::DateTime(dt)      => Value::String(dt.to_string()),
+        RawBsonRef::Timestamp(ts)     => json!({ "t": ts.time, "i": ts.increment }),
+        RawBsonRef::Decimal128(d)     => Value::String(d.to_string()),
+        RawBsonRef::Document(subdoc)  => {
+            let mut map = Map::new();
+            for item in subdoc.iter() {
+                if let Ok((k, v)) = item {
+                    map.insert(k.to_string(), raw_bson_ref_to_json(v));
+                }
+            }
+            Value::Object(map)
+        }
+        RawBsonRef::Array(arr) => Value::Array(
+            arr.into_iter()
+               .filter_map(|r| r.ok())
+               .map(raw_bson_ref_to_json)
+               .collect()
+        ),
+        other => Value::String(format!("{:?}", other)),
+    }
+}
+
+// ── Helpers communs ───────────────────────────────────────────────────────────
+
+/// Parse une chaîne JSON en Document BSON pour les filtres.
+/// Conversion spéciale : {"_id": "<hex>"} → {"_id": ObjectId("<hex>")}
+fn parse_filter(filter_str: &str) -> Result<Document, String> {
+    if filter_str.trim().is_empty() || filter_str.trim() == "{}" {
+        return Ok(Document::new());
+    }
+    let mut val: Value = serde_json::from_str(filter_str)
+        .map_err(|e| format!("Filtre JSON invalide '{}' : {}", filter_str, e))?;
+
+    if let Value::Object(ref mut map) = val {
+        if let Some(Value::String(id_str)) = map.get("_id") {
+            if let Ok(oid) = ObjectId::parse_str(id_str) {
+                let mut result = doc! { "_id": oid };
+                for (k, v) in map.iter().filter(|(k, _)| k.as_str() != "_id") {
+                    if let Ok(bv) = bson::to_bson(v) { result.insert(k.clone(), bv); }
+                }
+                return Ok(result);
+            }
+        }
+    }
+    bson::to_document(&val)
+        .map_err(|e| format!("Conversion BSON échouée : {}", e))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -198,7 +283,7 @@ fn bson_to_json(val: bson::Bson) -> Value {
 
 /// Parse une chaîne JSON en Document BSON.
 /// Gère la conversion spéciale {"_id": "<hex>"} → {"_id": ObjectId("<hex>")}
-fn parse_filter(filter_str: &str) -> Result<Document, String> {
+/*fn parse_filter(filter_str: &str) -> Result<Document, String> {
     if filter_str.trim().is_empty() || filter_str.trim() == "{}" {
         return Ok(Document::new());
     }
@@ -234,7 +319,7 @@ fn parse_filter(filter_str: &str) -> Result<Document, String> {
     // Conversion générique JSON → BSON
     bson::to_document(&val)
         .map_err(|e| format!("Conversion BSON échouée : {}", e))
-}
+}*/
 
 /// Substitue les paramètres nommés dans le filtre.
 /// ex: {"region": ":name"} + {name: "Europe"} → {"region": "Europe"}

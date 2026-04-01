@@ -1,20 +1,12 @@
-<div>
-    {{#each data}} <!-- trouver le moyen de ne pas parcourir pour accéder aux données -->
-    {{#if (eq "insert" this.form_action)}}
-    <form method="POST" action="/setdata/countries">
-    {{else}}
-    <form method="GET" action="/updatedata/countries">
-    {{/if}}
-        <label>Code</label><br>
-        <input type="text" name="code" value"{{this.code}}"><br>
+{{> partials/header page_title="Résultats"}}
+{{> partials/nav}}
+<div class="container">
+    <form method="POST" action="/setdata/countries"></form>
+    {{#each this.0}} <!-- trouver le moyen de parcourir le premier record pour accéder aux données -->
+        <label>{{@key}}</label><br>
+        <input type="text" name="{{@key}}" value"{{this}}"><br>
         <br>
-        <label>name_us</label><br>
-        <input type="text" name="name_us" value"{{this.name_us}}"><br>
-        <br>
-        <label>name_fr</label><br>
-        <input type="text" name="name_fr" value"{{this.name_fr}}"><br>
-        <br>
-        <input type="submit" value="Valider">
-    </form>
     {{/each}}
+    </form>
 </div>
+{{> partials/footer}}
