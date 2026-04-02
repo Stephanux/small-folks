@@ -125,5 +125,34 @@
         "filter": "{\"_id\": \":id\"}",
         "operation": "delete_one",
         "return_type": "json"
+    },
+    "GET/upload/form": {
+        "plugin":      "",
+        "sql":         "",
+        "view":        "upload_form.hbs",
+        "return_type": "html"
+    },
+    "POST/upload": {
+        "plugin":       "./target/release/libplugin_upload.so",
+        "allowed_mime": "image/jpeg,image/png,application/pdf",
+        "max_size_mb":  "10",
+        "return_type":  "redirect",
+        "redirect_to":  "/uploads"
+    },
+    "GET/uploads": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT id, filename, stored_as, mime_type, CAST(size_bytes AS CHAR) AS size_bytes, upload_dir, CAST(created_at AS CHAR) AS created_at FROM uploads ORDER BY created_at DESC",
+        "view":        "upload_list.hbs",
+        "return_type": "html"
+    },
+    "GET/api/uploads": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT id, uuid, filename, stored_as, mime_type, CAST(size_bytes AS CHAR) AS size_bytes, upload_dir, CAST(created_at AS CHAR) AS created_at FROM uploads ORDER BY created_at DESC",
+        "return_type": "json"
+    },
+    "DELETE/uploads/:uuid": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "DELETE FROM uploads WHERE uuid = :uuid",
+        "return_type": "json"
     }
 }

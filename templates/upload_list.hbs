@@ -1,0 +1,39 @@
+{{> partials/header page_title="Fichiers uploadés"}}
+{{> partials/nav}}
+
+<div class="container">
+  <div class="card">
+    <h1>Fichiers uploadés</h1>
+    <p style="margin-bottom:1rem;">
+      <a href="/upload/form"
+         style="padding:.5rem 1rem; background:#2c3e50; color:#fff;
+                border-radius:4px; text-decoration:none;">
+        + Nouveau fichier
+      </a>
+    </p>
+    {{#if this}}
+    <table id="data" class="datatable display" style="width:100%">
+      <thead>
+        <tr>
+          {{#each this.0}}
+          <th>{{@key}}</th>
+          {{/each}}
+        </tr>
+      </thead>
+      <tbody>
+        {{#each this}}
+        <tr>
+          {{#each this}}
+          <td>{{this}}</td>
+          {{/each}}
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+    {{else}}
+    <p style="color:#888; font-style:italic;">Aucun fichier uploadé pour l'instant.</p>
+    {{/if}}
+  </div>
+</div>
+
+{{> partials/footer}}

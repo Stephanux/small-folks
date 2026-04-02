@@ -15,19 +15,28 @@ pub struct AppState {
 /// sans connaître les détails de la route ou de la config.
 #[derive(Debug, Clone)]
 pub struct ActionContext {
-    /// Requête SQL lue depuis config_actions.json (avec params nommés :param)
+    // ── SQL ───────────────────────────────────────────────────────────────────
     pub sql:         String,
+    // ── MongoDB ───────────────────────────────────────────────────────────────
     pub collection:  String,
     pub filter:      String,
     pub operation:   String,
-    /// Paramètres nommés extraits de l'URL ou du body (:code, :name_us, ...)
+    // ── Upload ────────────────────────────────────────────────────────────────
+    /// Dossier de destination sur le disque (lu depuis UPLOAD_DIR dans .env)
+    pub upload_dir:  String,
+    /// Types MIME autorisés séparés par virgule (ex: "image/jpeg,image/png,application/pdf")
+    pub allowed_mime: String,
+    /// Taille maximale en Mo (ex: "10")
+    pub max_size_mb:  String,
+    // ── Commun ────────────────────────────────────────────────────────────────
     pub params:      std::collections::HashMap<String, String>,
-    /// Nom du template Handlebars à utiliser (vide si return_type = json)
     pub view:        String,
-    /// Type de retour attendu : "json", "html", "redirect"
     pub return_type: String,
-    /// URL de redirection (uniquement si return_type = "redirect")
     pub redirect_to: Option<String>,
+    /// Corps brut de la requête (pour multipart/form-data)
+    pub body_bytes:  Vec<u8>,
+    /// Content-Type complet de la requête (nécessaire pour parser le boundary multipart)
+    pub content_type: String,
 }
 
 /// Résultat retourné par un plugin au dispatcher.
