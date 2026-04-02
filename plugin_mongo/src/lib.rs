@@ -1,28 +1,77 @@
 use bson::{doc, oid::ObjectId, raw::RawDocumentBuf, Document};
-use mongodb::Collection;
+use mongodb::{options::{AuthMechanism, ClientOptions, Credential}, Collection};
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
 use serde_json::{json, Map, Value};
-use tokio::runtime::Runtime;
 use std::collections::HashMap;
-use std::sync::{OnceLock};
+use std::sync::OnceLock;
+use tokio::runtime::Runtime;
 
-// ── Runtime Tokio partagé — créé une seule fois au chargement du plugin ──────
-// OnceLock garantit l'initialisation thread-safe sans mutex à chaque appel.
-// Le runtime persiste pour toute la durée de vie du plugin (durée du processus).
-// Les connexions MongoDB du pool sont ainsi réutilisées entre les requêtes.
-static MONGO_RT: OnceLock<Runtime> = OnceLock::new();
+// ── Contexte MongoDB autonome — créé une seule fois au premier appel ──────────
+//
+// ARCHITECTURE CORRECTE :
+//   Le client MongoDB est créé DANS le MONGO_RT, pas dans le runtime principal.
+//   Toutes les tâches de fond du driver (heartbeat, pool de connexions,
+//   surveillance de topologie) s'exécutent sur les threads de MONGO_RT.
+//
+// POURQUOI c'est critique pour les performances :
+//   Si le client est créé dans main.rs (runtime principal), ses tâches de fond
+//   tournent sur les threads principaux. Quand plugin_sql appelle block_in_place,
+//   il bloque temporairement un thread principal → les tâches MongoDB sont
+//   affamées → le heartbeat manque un battement → le pool se dégrade →
+//   reconnexion forcée → latence de 1-8s sur la requête suivante.
+//
+//   En créant le client DANS MONGO_RT, block_in_place sur le runtime principal
+//   n'a AUCUN impact sur les tâches de fond MongoDB. Les deux runtimes sont
+//   complètement isolés.
+struct MongoContext {
+    rt:     Runtime,
+    client: mongodb::Client,
+}
 
-fn get_runtime() -> &'static Runtime {
-    MONGO_RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)          // 2 threads suffisent pour les I/O MongoDB
+static MONGO_CTX: OnceLock<MongoContext> = OnceLock::new();
+
+fn get_mongo_ctx() -> &'static MongoContext {
+    MONGO_CTX.get_or_init(|| {
+        // 1. Créer le runtime dédié MongoDB
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .thread_name("plugin-mongo")
             .build()
-            .expect("Impossible de créer le runtime Tokio du plugin MongoDB")
+            .expect("Impossible de créer le runtime Tokio du plugin MongoDB");
+
+        // 2. Créer le client DANS ce runtime
+        //    → les tâches de fond du driver s'ancrent sur MONGO_RT
+        let client = rt.block_on(async {
+            let uri = std::env::var("MONGODB_URI")
+                .expect("[plugin_mongo] MONGODB_URI absent du .env");
+
+            let mut opts = ClientOptions::parse(&uri).await
+                .expect("[plugin_mongo] URI MongoDB invalide");
+
+            // Authentification SCRAM-SHA-256 si les credentials sont définis
+            if let Ok(user) = std::env::var("MONGODB_USER") {
+                let pass    = std::env::var("MONGODB_PASS").unwrap_or_default();
+                let auth_db = std::env::var("MONGODB_AUTH_DB")
+                    .unwrap_or_else(|_| "admin".to_string());
+                opts.credential = Some(
+                    Credential::builder()
+                        .username(user)
+                        .password(pass)
+                        .source(auth_db)
+                        .mechanism(AuthMechanism::ScramSha256)
+                        .build()
+                );
+            }
+
+            mongodb::Client::with_options(opts)
+                .expect("[plugin_mongo] Impossible de créer le client MongoDB")
+        });
+
+        eprintln!("[plugin_mongo] Client MongoDB initialisé dans MONGO_RT");
+        MongoContext { rt, client }
     })
 }
-
 
 pub struct PluginMongo;
 
@@ -30,15 +79,18 @@ impl Plugin for PluginMongo {
     fn name(&self) -> &'static str { "mongo" }
 
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
-        let mongo_client = match &state.mongo {
-            Some(c) => c.clone(),
-            None    => return PluginResult::Error(
+        // Vérifie que MongoDB est activé (MONGODB_URI présent dans .env)
+        if state.mongo.is_none() {
+            return PluginResult::Error(
                 "MongoDB non configuré (MONGODB_URI absent du .env)".into()
-            ),
-        };
+            );
+        }
+
+        // Utilise le contexte autonome (client créé dans MONGO_RT)
+        let mongo_ctx  = get_mongo_ctx();
 
         let (db_name, coll_name) = parse_collection(&ctx.collection);
-        let db       = mongo_client.database(&db_name);
+        let db       = mongo_ctx.client.database(&db_name);
         let coll_raw = db.collection::<RawDocumentBuf>(&coll_name);
         let coll_doc = db.collection::<Document>(&coll_name);
 
@@ -46,24 +98,22 @@ impl Plugin for PluginMongo {
         let params     = ctx.params.clone();
         let operation  = ctx.operation.clone();
 
-        // Récupère le runtime partagé (déjà initialisé, zéro overhead)
-        let rt = get_runtime();
-
-        // block_on sur le runtime PARTAGÉ :
-        // - Le pool MongoDB reste chaud entre les requêtes
-        // - Pas de création/destruction de runtime à chaque appel
-        // - Les connexions sont réutilisées → latence réduite
-        rt.block_on(async move {
-            match operation.as_str() {
-                "find"       => op_find(coll_raw, &filter_str).await,
-                "find_one"   => op_find_one(coll_raw, &filter_str).await,
-                "insert_one" => op_insert_one(coll_doc, &params).await,
-                "update_one" => op_update_one(coll_doc, &filter_str, &params).await,
-                "delete_one" => op_delete_one(coll_doc, &filter_str).await,
-                other        => PluginResult::Error(
-                    format!("Opération MongoDB inconnue : '{}'", other)
-                ),
-            }
+        // block_in_place : notifie le runtime principal que ce thread va bloquer
+        // MONGO_RT.block_on : s'exécute dans un contexte totalement indépendant
+        // → aucune interférence possible avec plugin_sql ou d'autres plugins
+        tokio::task::block_in_place(|| {
+            mongo_ctx.rt.block_on(async move {
+                match operation.as_str() {
+                    "find"       => op_find(coll_raw, &filter_str).await,
+                    "find_one"   => op_find_one(coll_raw, &filter_str).await,
+                    "insert_one" => op_insert_one(coll_doc, &params).await,
+                    "update_one" => op_update_one(coll_doc, &filter_str, &params).await,
+                    "delete_one" => op_delete_one(coll_doc, &filter_str).await,
+                    other        => PluginResult::Error(
+                        format!("Opération MongoDB inconnue : '{}'", other)
+                    ),
+                }
+            })
         })
     }
 }
@@ -212,11 +262,11 @@ fn parse_filter(filter_str: &str) -> Result<Document, String> {
     if filter_str.trim().is_empty() || filter_str.trim() == "{}" {
         return Ok(Document::new());
     }
-    let mut val: Value = serde_json::from_str(filter_str)
+    let mut val: serde_json::Value = serde_json::from_str(filter_str)
         .map_err(|e| format!("Filtre JSON invalide '{}' : {}", filter_str, e))?;
 
-    if let Value::Object(ref mut map) = val {
-        if let Some(Value::String(id_str)) = map.get("_id") {
+    if let serde_json::Value::Object(ref mut map) = val {
+        if let Some(serde_json::Value::String(id_str)) = map.get("_id") {
             if let Ok(oid) = ObjectId::parse_str(id_str) {
                 let mut result = doc! { "_id": oid };
                 for (k, v) in map.iter().filter(|(k, _)| k.as_str() != "_id") {
