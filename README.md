@@ -1,4 +1,8 @@
-# small-folks — Framework MVC Rust piloté par configuration
+# Small-Folks — Framework MVC Rust piloté par configuration
+
+<p align="center">
+  <img src="https://mascaron.net/logo_small-folks-v1.png" alt="Logo Rust Framework small-Folks" />
+</p>
 
 Framework web Rust basé sur **Tide** avec un système de plugins dynamiques (`cdylib`),
 des routes et requêtes SQL/MongoDB entièrement configurées dans `config_actions.json`
@@ -6,7 +10,7 @@ sans recompilation.
 
 ## Stack technique
 
-- **Rust** (edition 2021)
+- **Rust** (rustc 1.94.0 [4a4ef493e 2026-03-02])
 - **Tide 0.16** — serveur web async
 - **Tokio 1** — runtime async (multi-thread)
 - **sqlx 0.7** — accès MySQL avec requêtes préparées
@@ -225,3 +229,6 @@ CREATE TABLE IF NOT EXISTS uploads (
     created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
+<p align="center">
+  <img src="https://mascaron.net/logo_small-folks-v2_50pc.png" alt="Logo Rust Framework small-Folks" />
+</p>
