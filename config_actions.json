@@ -6,86 +6,86 @@
         "return_type": "html"
     },
     "GET/communes": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT Code_commune_INSEE, Nom_de_la_commune, Code_postal FROM communes ORDER BY Code_commune_INSEE",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/countries": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries ORDER BY name_us",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/view/countries": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries LIMIT 1",
         "view": "form_countries.hbs",
         "return_type": "html"
     },
     "GET/api/countries": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",
         "view": "",
         "return_type": "json"
     },
     "GET/countries/:code": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE code=:code",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/countries/:code": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE code=:code",
         "view": "",
         "return_type": "json"
     },
     "POST/countries": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "INSERT INTO countries (code, name_us, name_fr) VALUES (:code, :name_us, :name_fr) ON DUPLICATE KEY UPDATE name_us = :name_us, name_fr = :name_fr",
         "view": "",
         "return_type": "redirect",
         "redirect_to": "/countries"
     },
 	"POST/delete_country": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
 		"sql": "delete from countries where code=:code",
 		"view": "tableGeneric.hbs"
 	},
     "PUT/countries/:code": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "UPDATE countries SET name_us = :name_us, name_fr = :name_fr WHERE code = :code",
         "view": "",
         "return_type": "redirect",
         "redirect_to": "/countries"
     },
     "DELETE/countries/:code": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "DELETE FROM countries WHERE code = :code",
         "view": "",
         "return_type": "json"
     },
     "GET/regions": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/regions": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
         "view": "",
         "return_type": "json"
     },
     "GET/regions/:name": {
-        "plugin": "./target/debug/libplugin_sql.so",
+        "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE region = :name ORDER BY name_us",
         "view": "tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/mongo/countries": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "filter": "{}",
         "operation": "find",
@@ -93,34 +93,34 @@
         "view": "tableGeneric.hbs"
     },
     "GET/api/mongo/countries": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "filter": "{}",
         "operation": "find",
         "return_type": "json"
     },
     "GET/api/mongo/countries/:id": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "filter": "{\"_id\": \":id\"}",
         "operation": "find_one",
         "return_type": "json"
     },
     "POST/api/mongo/countries": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "operation": "insert_one",
         "return_type": "json"
     },
     "PUT/api/mongo/countries/:id": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "filter": "{\"_id\": \":id\"}",
         "operation": "update_one",
         "return_type": "json"
     },
     "DELETE/api/mongo/countries/:id": {
-        "plugin": "./target/debug/libplugin_mongo.so",
+        "plugin": "./target/release/libplugin_mongo.so",
         "collection": "countries",
         "filter": "{\"_id\": \":id\"}",
         "operation": "delete_one",
