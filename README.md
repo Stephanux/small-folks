@@ -43,8 +43,6 @@ small-folks/
 ![alt Schéma architecture](https://mascaron.net/schema_architecture_Rust_Small-FolksV4.png)
 
 ```
-
-
 Client HTTP
   ↓ GET /mongo/countries
 Tide (main.rs) — catch-all /*
@@ -202,7 +200,7 @@ cargo build --release --all
 ./target/release/rust-plugin-tide
 ```
 
-**Important** : `config_actions.json` doit pointer vers `./target/release/libplugin_xxx.so`.
+**Important** : `config_actions.json` le plugin doit pointer vers `./target/release/libplugin_xxx.so`.
 Mélanger binaire release et `.so` debug (ou inversement) provoque un coredump.
 
 ## Performance observée (release, localhost)
