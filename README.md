@@ -40,9 +40,10 @@ small-folks/
 
 ## Flux d'une requête HTTP
 
+![alt Schéma architecture](https://mascaron.net/schema_architecture_Rust_Small-FolksV4.png)
+
 ```
 
-![alt Schéma architecture](https://mascaron.net/schema_architecture_Rust_Small-FolksV4.png)
 
 Client HTTP
   ↓ GET /mongo/countries
