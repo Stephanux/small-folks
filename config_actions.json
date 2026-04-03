@@ -5,6 +5,12 @@
         "view": "generics/error.hbs",
         "return_type": "html"
     },
+    "GET/": {
+        "plugin": "",
+        "sql": "",
+        "view": "generics/index.hbs",
+        "return_type": "html"
+    },
     "GET/index": {
         "plugin": "",
         "sql": "",

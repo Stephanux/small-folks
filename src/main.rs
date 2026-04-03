@@ -121,7 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .await
                             {
                                 Ok(_) => {
-                                    println!("Client MongoDB prêt (db='{}')\n", db_name);
+                                    println!("Client MongoDB prêt (db='{}')", db_name);
+                                    println!("Une nouvelle connexion sera faite dans le plugin Mongo pour une meilleure performance\n");
                                     Some(client)
                                 }
                                 Err(e) => {
