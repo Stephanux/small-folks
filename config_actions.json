@@ -2,7 +2,13 @@
     "GET/error": {
         "plugin": "",
         "sql": "",
-        "view": "error.hbs",
+        "view": "generics/error.hbs",
+        "return_type": "html"
+    },
+    "GET/index": {
+        "plugin": "",
+        "sql": "",
+        "view": "generics/index.hbs",
         "return_type": "html"
     },
     "GET/communes": {

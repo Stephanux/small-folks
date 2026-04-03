@@ -181,6 +181,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tide::log::start();
     app.with(tide::log::LogMiddleware::new());
 
+    //── Static directories ──────────────────────────────────────────────────────────
+    app.at("/images").serve_dir("public/images/")?;
+    app.at("/css").serve_dir("public/css/")?;
     // Route de santé (hors dispatcher)
     app.at("/health").get(|_| async move {
         Ok(tide::Response::builder(200)
