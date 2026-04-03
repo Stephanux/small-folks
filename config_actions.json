@@ -8,19 +8,19 @@
     "GET/communes": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT Code_commune_INSEE, Nom_de_la_commune, Code_postal FROM communes ORDER BY Code_commune_INSEE",
-        "view": "tableGeneric.hbs",
+        "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/countries": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries ORDER BY name_us",
-        "view": "tableGeneric.hbs",
+        "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/view/countries": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries LIMIT 1",
-        "view": "form_countries.hbs",
+        "view": "specifics/form_countries.hbs",
         "return_type": "html"
     },
     "GET/api/countries": {
@@ -32,7 +32,7 @@
     "GET/countries/:code": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE code=:code",
-        "view": "tableGeneric.hbs",
+        "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/countries/:code": {
@@ -51,7 +51,7 @@
 	"POST/delete_country": {
         "plugin": "./target/release/libplugin_sql.so",
 		"sql": "delete from countries where code=:code",
-		"view": "tableGeneric.hbs"
+		"view": "generics/tableGeneric.hbs"
 	},
     "PUT/countries/:code": {
         "plugin": "./target/release/libplugin_sql.so",
@@ -69,7 +69,7 @@
     "GET/regions": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
-        "view": "tableGeneric.hbs",
+        "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/api/regions": {
@@ -81,7 +81,7 @@
     "GET/regions/:name": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE region = :name ORDER BY name_us",
-        "view": "tableGeneric.hbs",
+        "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
     "GET/mongo/countries": {
@@ -90,7 +90,7 @@
         "filter": "{}",
         "operation": "find",
         "return_type": "html",
-        "view": "tableGeneric.hbs"
+        "view": "generics/tableGeneric.hbs"
     },
     "GET/api/mongo/countries": {
         "plugin": "./target/release/libplugin_mongo.so",
@@ -129,7 +129,7 @@
     "GET/upload/form": {
         "plugin":      "",
         "sql":         "",
-        "view":        "upload_form.hbs",
+        "view":        "generics/upload_form.hbs",
         "return_type": "html"
     },
     "POST/upload": {
@@ -142,7 +142,7 @@
     "GET/uploads": {
         "plugin":      "./target/release/libplugin_sql.so",
         "sql":         "SELECT id, filename, stored_as, mime_type, CAST(size_bytes AS CHAR) AS size_bytes, upload_dir, CAST(created_at AS CHAR) AS created_at FROM uploads ORDER BY created_at DESC",
-        "view":        "upload_list.hbs",
+        "view":        "generics/upload_list.hbs",
         "return_type": "html"
     },
     "GET/api/uploads": {
