@@ -22,7 +22,7 @@ sans recompilation.
 
 ```
 small-folks/
-├── CLAUDE.md                      ← ce fichier
+├── README.md                      ← ce fichier
 ├── config_actions.json            ← annuaire des routes (SQL + MongoDB + upload)
 ├── .env                           ← DATABASE_URL, MONGODB_URI, UPLOAD_DIR, ...
 ├── templates/                     ← vues Handlebars
@@ -31,10 +31,11 @@ small-folks/
 │   ├── listeGeneric.hbs           ← liste générique <select>
 │   ├── upload_form.hbs            ← formulaire upload
 │   └── upload_list.hbs            ← liste des fichiers uploadés
-├── plugin-core/src/lib.rs         ← traits et types partagés entre tous les plugins
-├── plugin_sql/src/lib.rs          ← plugin MySQL générique (SELECT/INSERT/UPDATE/DELETE)
-├── plugin_mongo/src/lib.rs        ← plugin MongoDB générique (find/insert/update/delete)
-├── plugin_upload/src/lib.rs       ← plugin upload multipart → disque + MySQL
+├── plugins/                       ← plugins du Framework
+│   ├── plugin-core/src/lib.rs         ← traits et types partagés entre tous les plugins
+│   ├── plugin_sql/src/lib.rs          ← plugin MySQL générique (SELECT/INSERT/UPDATE/DELETE)
+│   ├── plugin_mongo/src/lib.rs        ← plugin MongoDB générique (find/insert/update/delete)
+│   ├── plugin_upload/src/lib.rs       ← plugin upload multipart → disque + MySQL
 ├── src/main.rs                    ← démarrage serveur, pool MySQL, client MongoDB, précache plugins
 ├── src/dispatcher.rs              ← résolution routes, extraction params, rendu html/json/redirect
 └── sql/
@@ -87,7 +88,7 @@ HTTP 200 text/html
 | `allowed_mime` | `"image/jpeg,image/png,application/pdf"` | Types MIME autorisés (upload)        |
 | `max_size_mb`  | `"10"`                                   | Taille max en Mo (upload)            |
 | `view`         | nom du template `.hbs`                   | Ignoré si return_type ≠ html         |
-| `return_type`  | `html` `json` `redirect`                | Mode de réponse                      |
+| `return_type`  | `html` `json` `redirect`                 | Mode de réponse                      |
 | `redirect_to`  | URL                                      | Destination si redirect              |
 
 ## plugin-core — types partagés
