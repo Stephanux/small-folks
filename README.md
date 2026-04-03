@@ -22,7 +22,7 @@ sans recompilation.
 
 ```
 small-folks/
-├── CLAUDE.md                      ← ce fichier
+├── README.md                      ← ce fichier
 ├── config_actions.json            ← annuaire des routes (SQL + MongoDB + upload)
 ├── .env                           ← DATABASE_URL, MONGODB_URI, UPLOAD_DIR, ...
 ├── templates/                     ← vues Handlebars
