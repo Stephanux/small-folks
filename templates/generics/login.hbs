@@ -1,0 +1,64 @@
+{{> partials/header page_title="Connexion"}}
+
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:2rem;">
+  <div style="background:#fff; border-radius:12px; padding:2.5rem; width:100%; max-width:400px;
+              box-shadow:0 2px 12px rgba(0,0,0,.08);">
+
+    <h1 style="text-align:center; margin-bottom:0.5rem; color:#2c3e50; font-size:1.6rem;">
+      small-folks
+    </h1>
+    <p style="text-align:center; color:#888; margin-bottom:2rem; font-size:.9rem;">
+      Connexion à votre espace
+    </p>
+
+    {{#if (lookup @root "error")}}
+    <div style="background:#fdecea; border-left:4px solid #e53935; padding:.8rem 1rem;
+                border-radius:4px; color:#c62828; margin-bottom:1.2rem; font-size:.9rem;">
+      Identifiants incorrects. Veuillez réessayer.
+    </div>
+    {{/if}}
+
+    <form method="POST" action="/login"
+          style="display:flex; flex-direction:column; gap:1.2rem;">
+
+      <div>
+        <label for="login" style="display:block; margin-bottom:.4rem;
+               font-size:.85rem; font-weight:500; color:#444;">
+          Identifiant
+        </label>
+        <input type="text" id="login" name="login" required autocomplete="username"
+               placeholder="votre.login"
+               style="width:100%; padding:.65rem .9rem; border:1px solid #ccc;
+                      border-radius:6px; font-size:1rem; outline:none;
+                      transition:border-color .2s;"
+               onfocus="this.style.borderColor='#534AB7'"
+               onblur="this.style.borderColor='#ccc'">
+      </div>
+
+      <div>
+        <label for="mdp" style="display:block; margin-bottom:.4rem;
+               font-size:.85rem; font-weight:500; color:#444;">
+          Mot de passe
+        </label>
+        <input type="password" id="mdp" name="mdp" required autocomplete="current-password"
+               placeholder="••••••••"
+               style="width:100%; padding:.65rem .9rem; border:1px solid #ccc;
+                      border-radius:6px; font-size:1rem; outline:none;
+                      transition:border-color .2s;"
+               onfocus="this.style.borderColor='#534AB7'"
+               onblur="this.style.borderColor='#ccc'">
+      </div>
+
+      <button type="submit"
+              style="padding:.75rem; background:#534AB7; color:#fff; border:none;
+                     border-radius:6px; font-size:1rem; font-weight:500;
+                     cursor:pointer; transition:background .2s;"
+              onmouseover="this.style.background='#3C3489'"
+              onmouseout="this.style.background='#534AB7'">
+        Se connecter
+      </button>
+    </form>
+  </div>
+</div>
+
+{{> partials/footer}}

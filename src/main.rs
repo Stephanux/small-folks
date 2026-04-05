@@ -8,7 +8,7 @@ use plugin_core::{AppState, Plugin, PluginRegistrar};
 use sqlx::mysql::MySqlPoolOptions;
 use std::collections::HashMap;
 use std::env;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
 type PluginEntryFn = unsafe fn(&mut dyn PluginRegistrar);
@@ -138,7 +138,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let handle = Handle::current();
-    let state  = AppState { pool, handle, mongo };
+    // Cache de sessions partagé entre tous les handlers
+    let sessions = Arc::new(Mutex::new(HashMap::new()));
+
+    let state  = AppState { pool, handle, mongo, sessions};
 
     // ── Précache des plugins au démarrage ────────────────────────────────────
     // On collecte les chemins uniques de plugins référencés dans le JSON

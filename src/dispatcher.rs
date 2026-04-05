@@ -23,6 +23,9 @@ pub struct ActionConfig {
     pub view:         Option<String>,
     pub return_type:  Option<String>,
     pub redirect_to:  Option<String>,
+    /// Si true : exige un cookie session_id valide avant d'exécuter le plugin
+    #[serde(default)]
+    pub auth:         bool,
 }
 
 pub struct Dispatcher {
@@ -58,22 +61,24 @@ impl Dispatcher {
                 &format!("Route introuvable : {} {}", method, path)),
         };
 
-        // ── Collecte des paramètres URL / query string ────────────────────────
+        // ── Collecte des paramètres ───────────────────────────────────────────
         let mut params: HashMap<String, String> = url_params;
         for (k, v) in req.url().query_pairs() {
             params.insert(k.to_string(), v.to_string());
         }
 
-        // ── Lecture du Content-Type et du body ────────────────────────────────
+        // ── Cookie session_id → injecté dans params pour plugin_auth ─────────
+        if let Some(cookie) = req.cookie("session_id") {
+            params.insert("session_id".to_string(), cookie.value().to_string());
+        }
+
+        // ── Lecture Content-Type et body ──────────────────────────────────────
         let content_type = req
             .content_type()
             .map(|m| m.to_string())
             .unwrap_or_default();
 
-        // Pour multipart : on lit le body brut (bytes)
-        // Pour JSON/form classique : on parse les paramètres
         let body_bytes: Vec<u8> = if content_type.contains("multipart/form-data") {
-            // Body brut pour le plugin_upload
             req.body_bytes().await.unwrap_or_default()
         } else if matches!(method.as_str(), "POST" | "PUT" | "PATCH") {
             if content_type.contains("application/json") {
@@ -91,7 +96,6 @@ impl Dispatcher {
                 }
                 Vec::new()
             } else {
-                // application/x-www-form-urlencoded
                 let body_str = req.body_string().await.unwrap_or_default();
                 for pair in body_str.split('&') {
                     let mut parts = pair.splitn(2, '=');
@@ -105,13 +109,10 @@ impl Dispatcher {
             Vec::new()
         };
 
-        // ── Résolution de UPLOAD_DIR depuis .env ──────────────────────────────
-        let upload_dir = action.upload_dir
-            .clone()
+        let upload_dir = action.upload_dir.clone()
             .unwrap_or_else(|| std::env::var("UPLOAD_DIR")
                 .unwrap_or_else(|_| "./uploads".to_string()));
 
-        // ── Construction du ActionContext ─────────────────────────────────────
         let ctx = ActionContext {
             sql:          action.sql.clone().unwrap_or_default(),
             collection:   action.collection.clone().unwrap_or_default(),
@@ -129,61 +130,150 @@ impl Dispatcher {
             content_type,
         };
 
-        // ── Exécution du plugin ───────────────────────────────────────────────
-        let data = if let Some(plugin_path) = &action.plugin {
-            if plugin_path.is_empty() {
-                serde_json::Value::Null
+        // ── Vérification authentification ────────────────────────────────────
+        if action.auth {
+            let session_id = ctx.params.get("session_id").cloned().unwrap_or_default();
+            let authenticated = if session_id.is_empty() {
+                false
             } else {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let sess = req.state().sessions.lock().unwrap();
+                match sess.get(&session_id) {
+                    Some(user) if user.expires_at > now => true,
+                    _ => false,
+                }
+            };
+
+            if !authenticated {
+                // API → 401 JSON
+                // Page HTML → redirect vers /login
+                if ctx.return_type == "json" {
+                    return Ok(Response::builder(401)
+                        .body(serde_json::json!({"error": "Non authentifié"}).to_string())
+                        .content_type("application/json")
+                        .build());
+                } else {
+                    let login_url = format!("/login?next={}", urlencoding_encode(&path));
+                    return Ok(Response::builder(303)
+                        .header("Location", login_url.as_str())
+                        .build());
+                }
+            }
+        }
+
+        // ── Exécution du plugin ───────────────────────────────────────────────
+        if let Some(plugin_path) = &action.plugin {
+            if !plugin_path.is_empty() {
                 let plugin_name = self.plugin_name_from_path(plugin_path);
                 match self.plugins.get(&plugin_name) {
+                    None => return self.render_error(500,
+                        &format!("Plugin '{}' non chargé", plugin_name)),
                     Some(plugin) => {
                         let state = req.state().clone();
                         match plugin.execute(&ctx, &state) {
-                            PluginResult::Data(v)  => v,
+
+                            // ── Cas standard ─────────────────────────────────
+                            PluginResult::Data(data) => {
+                                return self.render_data(data, &ctx);
+                            }
                             PluginResult::Error(e) => {
                                 eprintln!("[dispatcher] Plugin error: {}", e);
                                 return self.render_error(500, &e);
                             }
+
+                            // ── Login réussi ──────────────────────────────────
+                            // IMPORTANT : Tide écrase les headers en double.
+                            // On doit utiliser insert_cookie() pour poser
+                            // plusieurs cookies sur la même réponse.
+                            PluginResult::AuthSuccess { session_id, jwt, redirect_to, user: _ } => {
+                                let session_ttl = std::env::var("SESSION_TTL_SECONDS")
+                                    .unwrap_or_else(|_| "3600".to_string())
+                                    .parse::<i64>()
+                                    .unwrap_or(3600);
+
+                                let mut res = tide::Response::new(303);
+                                res.insert_header("Location", redirect_to.as_str());
+
+                                // Cookie session_id — HttpOnly (non accessible JS)
+                                res.insert_header(
+                                    "Set-Cookie",
+                                    format!(
+                                        "session_id={}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax",
+                                        session_id, session_ttl
+                                    ).as_str(),
+                                );
+                                // Cookie jwt — accessible JS pour les appels API
+                                // On utilise append_header pour ne pas écraser session_id
+                                res.append_header(
+                                    "Set-Cookie",
+                                    format!(
+                                        "jwt_token={}; Path=/; Max-Age={}; SameSite=Lax",
+                                        jwt, session_ttl
+                                    ).as_str(),
+                                );
+                                return Ok(res);
+                            }
+
+                            // ── Login échoué ──────────────────────────────────
+                            PluginResult::AuthError(msg) => {
+                                eprintln!("[auth] Échec login : {}", msg);
+                                return Ok(Response::builder(303)
+                                    .header("Location", "/login?error=1")
+                                    .build());
+                            }
+
+                            // ── Logout ────────────────────────────────────────
+                            PluginResult::AuthLogout { redirect_to } => {
+                                return Ok(Response::builder(303)
+                                    .header("Location",   &redirect_to)
+                                    .header("Set-Cookie", "session_id=; Path=/; Max-Age=0; HttpOnly")
+                                    .header("Set-Cookie", "jwt_token=; Path=/; Max-Age=0")
+                                    .build());
+                            }
                         }
                     }
-                    None => return self.render_error(500,
-                        &format!("Plugin '{}' non chargé", plugin_name)),
                 }
             }
-        } else {
-            serde_json::Value::Null
-        };
-
-        // ── Rendu selon return_type ───────────────────────────────────────────
-        match ctx.return_type.as_str() {
-            "json" => {
-                let body = serde_json::to_string(&data)?;
-                Ok(Response::builder(200)
-                    .body(body)
-                    .content_type("application/json")
-                    .build())
-            }
-            "html" => {
-                let view_name = ctx.view.trim_end_matches(".hbs");
-                match self.hbs.render(view_name, &data) {
-                    Ok(html) => Ok(Response::builder(200)
-                        .body(html)
-                        .content_type("text/html;charset=utf-8")
-                        .build()),
-                    Err(e) => self.render_error(500,
-                        &format!("Erreur template '{}' : {}", view_name, e)),
-                }
-            }
-            "redirect" => {
-                let target = ctx.redirect_to.as_deref().unwrap_or("/");
-                Ok(Response::builder(303)
-                    .header("Location", target)
-                    .build())
-            }
-            other => self.render_error(500,
-                &format!("return_type inconnu : '{}'", other)),
         }
+
+        // Route sans plugin
+        self.render_data(serde_json::Value::Null, &ctx)
     }
+        // ── Rendu selon return_type ───────────────────────────────────────────
+        fn render_data(&self, data: serde_json::Value, ctx: &ActionContext) -> tide::Result {
+            match ctx.return_type.as_str() {
+                "json" => {
+                    let body = serde_json::to_string(&data)?;
+                    Ok(Response::builder(200)
+                        .body(body)
+                        .content_type("application/json")
+                        .build())
+                }
+                "html" => {
+                    let view_name = ctx.view.trim_end_matches(".hbs");
+                    match self.hbs.render(view_name, &data) {
+                        Ok(html) => Ok(Response::builder(200)
+                            .body(html)
+                            .content_type("text/html;charset=utf-8")
+                            .build()),
+                        Err(e) => self.render_error(500,
+                            &format!("Erreur template '{}' : {}", view_name, e)),
+                    }
+                }
+                "redirect" => {
+                    let target = ctx.redirect_to.as_deref().unwrap_or("/");
+                    Ok(Response::builder(303)
+                        .header("Location", target)
+                        .build())
+                }
+                other => self.render_error(500,
+                    &format!("return_type inconnu : '{}'", other)),
+            }
+        }
+
 
     fn resolve_action(
         &self, method: &str, path: &str,
@@ -233,6 +323,23 @@ fn match_path_params(pattern: &str, path: &str) -> Option<HashMap<String, String
         }
     }
     Some(params)
+}
+
+fn urlencoding_encode(s: &str) -> String {
+    let mut result = String::new();
+    for c in s.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9'
+            | '-' | '_' | '.' | '~' | '/' => result.push(c),
+            c => {
+                let bytes = c.to_string();
+                for b in bytes.as_bytes() {
+                    result.push_str(&format!("%{:02X}", b));
+                }
+            }
+        }
+    }
+    result
 }
 
 fn urlencoding_decode(s: &str) -> String {

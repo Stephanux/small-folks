@@ -1,5 +1,22 @@
 use sqlx::MySqlPool;
 use tokio::runtime::Handle;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+
+
+/// Informations utilisateur stockées dans le cache de sessions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionUser {
+    pub id_users:      i64,
+    pub login:         String,
+    pub name:          String,
+    pub first_name:    String,
+    pub function:      String,
+    pub office:        String,
+    /// Timestamp Unix d'expiration (epoch secondes)
+    pub expires_at:    u64,
+}
 
 /// État partagé injecté dans chaque requête Tide.
 #[derive(Clone)]
@@ -7,6 +24,9 @@ pub struct AppState {
     pub pool:   MySqlPool,
     pub handle: Handle,
     pub mongo:  Option<mongodb::Client>,
+    /// Cache des sessions actives : session_id → SessionUser
+    /// Arc<Mutex> pour partage thread-safe entre handlers Tide
+    pub sessions: Arc<Mutex<HashMap<String, SessionUser>>>,
 
 }
 
@@ -43,8 +63,21 @@ pub struct ActionContext {
 pub enum PluginResult {
     /// Données JSON à sérialiser ou à passer au template Handlebars
     Data(serde_json::Value),
-    /// Message d'erreur à afficher
+    /// Erreur générique → HTTP 500
     Error(String),
+    /// Login réussi → dispatcher pose les cookies et redirige
+    AuthSuccess {
+        session_id:  String,
+        jwt:         String,
+        redirect_to: String,
+        user:        serde_json::Value,
+    },
+    /// Login échoué → dispatcher redirige vers /login?error=1
+    AuthError(String),
+    /// Logout → dispatcher supprime les cookies et redirige
+    AuthLogout {
+        redirect_to: String,
+    },
 }
 
 /// Trait que chaque plugin doit implémenter.

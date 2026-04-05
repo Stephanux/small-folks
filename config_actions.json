@@ -11,6 +11,28 @@
         "view": "generics/index.hbs",
         "return_type": "html"
     },
+    "GET/login": {
+        "plugin":      "",
+        "view":        "generics/login.hbs",
+        "return_type": "html"
+    },
+    "POST/login": {
+        "plugin":      "./target/release/libplugin_auth.so",
+        "operation":   "login",
+        "return_type": "redirect",
+        "redirect_to": "/index"
+    },
+    "GET/logout": {
+        "plugin":      "./target/release/libplugin_auth.so",
+        "operation":   "logout",
+        "return_type": "redirect",
+        "redirect_to": "/login"
+    },
+    "GET/api/me": {
+        "plugin":      "./target/release/libplugin_auth.so",
+        "operation":   "me",
+        "return_type": "json"
+    },
     "GET/index": {
         "plugin": "",
         "sql": "",
@@ -82,7 +104,8 @@
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
         "view": "generics/tableGeneric.hbs",
-        "return_type": "html"
+        "return_type": "html",
+        "auth": true
     },
     "GET/api/regions": {
         "plugin": "./target/release/libplugin_sql.so",

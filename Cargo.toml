@@ -2,6 +2,7 @@
 members = [
     ".",
     "plugins/plugin-core",
+    "plugins/plugin_auth",
     "plugins/plugin_sql",
     "plugins/plugin_mongo",
     "plugins/plugin_upload",
