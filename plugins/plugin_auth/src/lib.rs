@@ -152,9 +152,8 @@ fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
                         "function":   function,
                         "office":     office,
                     });
-                    println!("==> retour authentif : {:?}", user_json);
-                    let redirect = std::env::var("LOGIN_REDIRECT")
-                        .unwrap_or_else(|_| "/".to_string());
+                    //println!("==> retour authentif : {:?}", user_json);
+                    //let redirect = std::env::var("LOGIN_REDIRECT").unwrap_or_else(|_| "/".to_string());
 
                     PluginResult::AuthSuccess {
                         session_id,

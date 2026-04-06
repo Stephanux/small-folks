@@ -188,7 +188,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //── Static directories ──────────────────────────────────────────────────────────
     app.at("/images").serve_dir("public/images/")?;
     app.at("/css").serve_dir("public/css/")?;
-    // Route de santé (hors dispatcher)
+    app.at("/uploads").serve_dir("uploads/")?;
+
+    // Route de santé (hors dispatcher) voir si possible utiliser un plugin_eBPF pour taille mémoire, dispo serveur.
     app.at("/health").get(|_| async move {
         Ok(tide::Response::builder(200)
             .body("{\"status\":\"ok\"}")
