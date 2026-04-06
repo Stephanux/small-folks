@@ -27,20 +27,24 @@ small-folks/
 ├── .env                           ← DATABASE_URL, MONGODB_URI, UPLOAD_DIR, ...
 ├── templates/                     ← vues Handlebars
 │   ├── partials/                  ← header.hbs, nav.hbs, footer.hbs
-│   ├── tableGeneric.hbs           ← tableau générique avec DataTables.js
-│   ├── listeGeneric.hbs           ← liste générique <select>
-│   ├── upload_form.hbs            ← formulaire upload
-│   └── upload_list.hbs            ← liste des fichiers uploadés
+│   ├── generics/                  ← templates génériques  
+│   │    ├── tableGeneric.hbs           ← tableau générique avec DataTables.js
+│   │    ├── listeGeneric.hbs           ← liste générique <select>
+│   │    ├── upload_form.hbs            ← formulaire upload
+│   │    └── upload_list.hbs            ← liste des fichiers uploadés
+│   ├── specifics                  ← templates spécifiques
+│        └── form_countries.hbs         ← formulaire pour la table countries
 ├── plugins/                       ← plugins du Framework
 │   ├── plugin-core/src/lib.rs         ← traits et types partagés entre tous les plugins
+│   ├── plugin_auth.rs                 ← plugin d'Authentification sur la base de données
 │   ├── plugin_sql/src/lib.rs          ← plugin MySQL générique (SELECT/INSERT/UPDATE/DELETE)
 │   ├── plugin_mongo/src/lib.rs        ← plugin MongoDB générique (find/insert/update/delete)
 │   ├── plugin_upload/src/lib.rs       ← plugin upload multipart → disque + MySQL
 ├── src/main.rs                    ← démarrage serveur, pool MySQL, client MongoDB, précache plugins
 ├── src/dispatcher.rs              ← résolution routes, extraction params, rendu html/json/redirect
 └── sql/
-    ├── create_countries.sql
-    └── create_uploads.sql
+    ├── create_countries.sql       ← structure de la table countries pour tests
+    └── create_uploads.sql         ← structure de la table uploads pour tests
 ```
 
 ## Flux d'une requête HTTP
@@ -56,6 +60,8 @@ dispatcher.rs
   ├─ resolve_action("GET", "/mongo/countries") → config_actions.json
   ├─ extrait params URL / query string / body
   ├─ construit ActionContext { sql, collection, filter, operation, params, ... }
+  ↓
+SI auht = true → affichage login.hbs → plugin_auth.execute
   ↓
 plugin_mongo.execute(ctx, state)      ← synchrone (contrainte FFI)
   ├─ get_mongo_ctx() → MongoContext { rt: MONGO_RT, client }
@@ -90,6 +96,7 @@ HTTP 200 text/html
 | `view`         | nom du template `.hbs`                   | Ignoré si return_type ≠ html         |
 | `return_type`  | `html` `json` `redirect`                 | Mode de réponse                      |
 | `redirect_to`  | URL                                      | Destination si redirect              |
+| `auth       `  | true ou absent                           | Impose une authentif. a l'action     |
 
 ## plugin-core — types partagés
 
@@ -98,6 +105,9 @@ pub struct AppState {
     pub pool:   MySqlPool,      // pool MySQL partagé
     pub handle: Handle,         // handle runtime Tokio principal
     pub mongo:  Option<Client>, // client MongoDB (sert de flag "MongoDB activé")
+    /// Cache des sessions actives : session_id → SessionUser
+    /// Arc<Mutex> pour partage thread-safe entre handlers Tide
+    pub sessions: Arc<Mutex<HashMap<String, SessionUser>>>,
 }
 
 pub struct ActionContext {
@@ -163,6 +173,22 @@ tokio::task::block_in_place(|| {
 })
 ```
 
+### plugin_auth — Gestion de l'authentification via la base de données
+
+```rust
+/// Informations utilisateur stockées dans le cache de sessions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionUser {
+    pub id_users:      i64,
+    pub login:         String,
+    pub name:          String,
+    pub first_name:    String,
+    pub function:      String,
+    pub office:        String,
+    /// Timestamp Unix d'expiration (epoch secondes)
+    pub expires_at:    u64,
+}```
+
 ### Règles SQL pour le plugin_sql générique
 - Toutes les colonnes de SELECT doivent être de type `CHAR`/`VARCHAR` ou castées
 - `CAST(COUNT(*) AS CHAR)` pour les agrégats
@@ -212,6 +238,7 @@ Mélanger binaire release et `.so` debug (ou inversement) provoque un coredump.
 
 | Plugin      | Opération           | Latence  |
 |-------------|---------------------|----------|
+| plugin_auth | SELECT  1 lignes    | <= 1 ms  |
 | plugin_sql  | SELECT 243 lignes   | 1-5ms    |
 | plugin_mongo| find 243 documents  | 3-5ms    |
 | plugin_upload| upload 1 fichier   | < 10ms   |
