@@ -51,6 +51,8 @@ impl Plugin for PluginAuth {
 fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
     let login = ctx.params.get("login").cloned().unwrap_or_default();
     let mdp   = ctx.params.get("mdp").cloned().unwrap_or_default();
+    let next   = ctx.params.get("next").cloned().unwrap_or_default();
+    println!("===> next value into plugin_auth : {}", next);
 
     if login.is_empty() || mdp.is_empty() {
         return PluginResult::AuthError("Login et mot de passe requis".into());
@@ -70,7 +72,7 @@ fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
 
     tokio::task::block_in_place(|| {
         state.handle.block_on(async move {
-            println!("en entrée dela fonction do_login");
+            println!("en entrée de la fonction do_login");
             // Vérification login/mdp en base (mot de passe en clair)
             let row = sqlx::query_as::<_, UserRow>(
                 "SELECT id_users, name, firstName, login, function, office
@@ -157,7 +159,7 @@ fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
                     PluginResult::AuthSuccess {
                         session_id,
                         jwt,
-                        redirect_to: redirect,
+                        redirect_to: next,
                         user: user_json,
                     }
                 }
