@@ -57,6 +57,7 @@ pub struct ActionContext {
     pub body_bytes:  Vec<u8>,
     /// Content-Type complet de la requête (nécessaire pour parser le boundary multipart)
     pub content_type: String,
+    pub form_action: Option<String>,   // ← nouveau gère l'action d'un formulaire (ex.: "/countrie")
 }
 
 /// Résultat retourné par un plugin au dispatcher.

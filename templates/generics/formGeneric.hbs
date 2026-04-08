@@ -1,0 +1,23 @@
+{{> partials/header page_title="Formulaire"}}
+{{> partials/nav}}
+<div class="container">
+  <form class="generic-form" method="POST" action="{{form_action}}" id="formgeneric">
+    {{#each data.0}}
+      <div class="form-group">
+        <label class="form-label" for="{{@key}}">{{@key}}</label>
+        <input class="form-input" type="text" id="{{@key}}" name="{{@key}}" value="{{this}}">
+      </div>
+    {{/each}}
+    <div class="form-actions">
+      <button type="submit" class="btn-submit">Enregistrer</button>
+      <a href="javascript:history.back()" class="btn-cancel">Annuler</a>
+    </div>
+  </form>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form_action = (document.getElementById("formgeneric").action.split('8080/')[1]).split('_')[0];
+        console.log("type action : ", form_action);
+    });
+</script>
+{{> partials/footer}}

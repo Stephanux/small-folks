@@ -1,7 +1,7 @@
 {{> partials/header page_title="Résultats"}}
 {{> partials/nav}}
 <div class="container">
-    <form method="POST" action="/setdata/countries"></form>
+    <form method="POST" action="/countries"></form>
     {{#each this.0}} <!-- trouver le moyen de parcourir le premier record pour accéder aux données -->
         <label>{{@key}}</label><br>
         <input type="text" name="{{@key}}" value"{{this}}"><br>

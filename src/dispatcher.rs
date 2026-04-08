@@ -26,6 +26,8 @@ pub struct ActionConfig {
     /// Si true : exige un cookie session_id valide avant d'exécuter le plugin
     #[serde(default)]
     pub auth:         bool,
+    #[serde(default)]
+    pub form_action: Option<String>,   // ← nouveau
 }
 
 pub struct Dispatcher {
@@ -128,6 +130,7 @@ impl Dispatcher {
             redirect_to:  action.redirect_to.clone(),
             body_bytes,
             content_type,
+            form_action: action.form_action.clone(),   // ← nouveau
         };
 
         // ── Vérification authentification ────────────────────────────────────
@@ -254,6 +257,23 @@ impl Dispatcher {
                 }
                 "html" => {
                     let view_name = ctx.view.trim_end_matches(".hbs");
+
+                    // Injecter form_action dans les données si défini
+                    let data = if let Some(fa) = &ctx.form_action {
+                        match data {
+                            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                                let mut wrapper = serde_json::Map::new();
+                                wrapper.insert("data".to_string(), data);
+                                wrapper.insert("form_action".to_string(),
+                                    serde_json::Value::String(fa.clone()));
+                                serde_json::Value::Object(wrapper)
+                            }
+                            _ => data,
+                        }
+                    } else {
+                        data
+                    };
+
                     match self.hbs.render(view_name, &data) {
                         Ok(html) => Ok(Response::builder(200)
                             .body(html)
@@ -263,6 +283,17 @@ impl Dispatcher {
                             &format!("Erreur template '{}' : {}", view_name, e)),
                     }
                 }
+                /*"html" => {
+                    let view_name = ctx.view.trim_end_matches(".hbs");
+                    match self.hbs.render(view_name, &data) {
+                        Ok(html) => Ok(Response::builder(200)
+                            .body(html)
+                            .content_type("text/html;charset=utf-8")
+                            .build()),
+                        Err(e) => self.render_error(500,
+                            &format!("Erreur template '{}' : {}", view_name, e)),
+                    }
+                }*/
                 "redirect" => {
                     let target = ctx.redirect_to.as_deref().unwrap_or("/");
                     Ok(Response::builder(303)

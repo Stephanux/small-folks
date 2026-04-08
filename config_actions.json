@@ -33,6 +33,19 @@
         "operation":   "me",
         "return_type": "json"
     },
+    "GET/users": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT CAST(id_users AS CHAR), name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries FROM users ORDER BY name",
+        "view": "generics/tableGeneric.hbs",
+        "return_type": "html"
+    },
+    "GET/view/users": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone FROM users LIMIT 1",
+        "view": "generics/formGeneric.hbs",
+        "return_type": "html",
+        "form_action": "/users"
+    },
     "GET/index": {
         "plugin": "",
         "sql": "",
@@ -54,14 +67,16 @@
     "GET/view/countries": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries LIMIT 1",
-        "view": "specifics/form_countries.hbs",
-        "return_type": "html"
+        "view": "generics/formGeneric.hbs",
+        "return_type": "html",
+        "form_action": "/insert_country"
     },
     "GET/api/countries": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",
         "view": "",
-        "return_type": "json"
+        "return_type": "json",
+        "auth": true
     },
     "GET/countries/:code": {
         "plugin": "./target/release/libplugin_sql.so",
@@ -75,7 +90,7 @@
         "view": "",
         "return_type": "json"
     },
-    "POST/countries": {
+    "POST/insert_country": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "INSERT INTO countries (code, name_us, name_fr) VALUES (:code, :name_us, :name_fr) ON DUPLICATE KEY UPDATE name_us = :name_us, name_fr = :name_fr",
         "view": "",
@@ -132,7 +147,8 @@
         "collection": "countries",
         "filter": "{}",
         "operation": "find",
-        "return_type": "json"
+        "return_type": "json",
+        "auth": true
     },
     "GET/api/mongo/countries/:id": {
         "plugin": "./target/release/libplugin_mongo.so",

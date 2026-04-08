@@ -96,7 +96,7 @@ HTTP 200 text/html
 | `view`         | nom du template `.hbs`                   | Ignoré si return_type ≠ html         |
 | `return_type`  | `html` `json` `redirect`                 | Mode de réponse                      |
 | `redirect_to`  | URL                                      | Destination si redirect              |
-| `auth       `  | true ou absent                           | Impose une authentif. a l'action     |
+| `auth       `  | true ou absent                           | Impose une authentif. à l'action     |
 
 ## plugin-core — types partagés
 
@@ -124,6 +124,7 @@ pub struct ActionContext {
     pub redirect_to:  Option<String>,      // URL de redirect
     pub body_bytes:   Vec<u8>,             // body brut (multipart)
     pub content_type: String,              // Content-Type complet de la requête
+    pub form_action:  Option<String>,      // ← nouveau gère l'action d'un formulaire (ex.: "/insert_countries")
 }
 
 // Trait FFI — SYNCHRONE obligatoire (async_trait interdit sur cdylib)

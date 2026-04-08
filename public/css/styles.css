@@ -57,3 +57,71 @@ table.dataTable thead th {
     margin-left: auto;
     margin-right: auto;
 }
+
+/* ── Formulaire générique ────────────────────────────────── */
+.generic-form {
+  max-width: 560px;
+  margin: 2rem auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.form-label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-secondary, #555);
+  text-transform: capitalize;
+}
+
+.form-input {
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+  background: var(--color-background-primary, #fff);
+  color: var(--color-text-primary, #222);
+}
+
+.form-input:focus {
+  border-color: #534AB7;
+  box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
+}
+
+.form-actions {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  align-items: center;
+}
+
+.btn-submit {
+  padding: 0.65rem 1.6rem;
+  background: #534AB7;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-submit:hover { background: #3C3489; }
+
+.btn-cancel {
+  font-size: 0.9rem;
+  color: #888;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.btn-cancel:hover { color: #534AB7; }
