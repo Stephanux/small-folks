@@ -57,9 +57,10 @@ pub struct ActionContext {
     pub body_bytes:  Vec<u8>,
     /// Content-Type complet de la requête (nécessaire pour parser le boundary multipart)
     pub content_type: String,
-    pub form_action: Option<String>,   // ← nouveau gère l'action d'un formulaire (ex.: "/countrie")
+    pub data_resources: HashMap<String, String>,  // "code_countries" → "countries"
+    pub sql_resources:  HashMap<String, String>,  // "countries" → "SELECT code, name_fr..."
+    pub form_action:    Option<String>,           // ← nouveau gère l'action d'un formulaire (ex.: "/countrie")
 }
-
 /// Résultat retourné par un plugin au dispatcher.
 pub enum PluginResult {
     /// Données JSON à sérialiser ou à passer au template Handlebars

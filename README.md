@@ -1,51 +1,76 @@
-# Small-Folks — Framework MVC Rust piloté par configuration
+# small-folks — Framework MVC Rust piloté par configuration
 
 <p align="center">
   <img src="https://mascaron.net/logo_small-folks-v1.png" alt="Logo Rust Framework small-Folks" />
 </p>
 
-Framework web Rust basé sur **Tide** avec un système de plugins dynamiques (`cdylib`),
-des routes et requêtes SQL/MongoDB entièrement configurées dans `config_actions.json`
-sans recompilation.
+Framework web **Rust** basé sur **Tide** avec un système de plugins dynamiques (`cdylib`).
+Routes, requêtes SQL/MongoDB, vues et ressources entièrement configurées dans `config_actions.json` **sans recompilation**.
+
+---
 
 ## Stack technique
 
-- **Rust** (rustc 1.94.0 [4a4ef493e 2026-03-02])
-- **Tide 0.16** — serveur web async
-- **Tokio 1** — runtime async (multi-thread)
-- **sqlx 0.7** — accès MySQL avec requêtes préparées
-- **mongodb 3.5** — driver MongoDB avec RawDocumentBuf (zero-copy)
-- **Handlebars 6.4** — templates HTML avec partials
-- **libloading 0.8** — chargement dynamique des plugins `.so`
+| Composant | Version | Rôle |
+|---|---|---|
+| Rust | 2021 edition | langage |
+| Tide | 0.16 | serveur HTTP async |
+| Tokio | 1 | runtime async multi-thread |
+| sqlx | 0.7 | accès MySQL, requêtes préparées |
+| mongodb | 3.5 | driver MongoDB zero-copy (RawDocumentBuf) |
+| Handlebars | 6.4 | templates HTML avec partials |
+| libloading | 0.8 | chargement dynamique des `.so` |
+| jsonwebtoken | 9 | JWT HS256 pour l'authentification |
+| multer | 3 | parsing multipart/form-data |
+| uuid | 1 | génération d'identifiants uniques |
+
+---
 
 ## Architecture du workspace
 
 ```
 small-folks/
-├── README.md                      ← ce fichier
-├── config_actions.json            ← annuaire des routes (SQL + MongoDB + upload)
-├── .env                           ← DATABASE_URL, MONGODB_URI, UPLOAD_DIR, ...
-├── templates/                     ← vues Handlebars
-│   ├── partials/                  ← header.hbs, nav.hbs, footer.hbs
-│   ├── generics/                  ← templates génériques  
-│   │    ├── tableGeneric.hbs           ← tableau générique avec DataTables.js
-│   │    ├── listeGeneric.hbs           ← liste générique <select>
-│   │    ├── upload_form.hbs            ← formulaire upload
-│   │    └── upload_list.hbs            ← liste des fichiers uploadés
-│   ├── specifics                  ← templates spécifiques
-│        └── form_countries.hbs         ← formulaire pour la table countries
-├── plugins/                       ← plugins du Framework
-│   ├── plugin-core/src/lib.rs         ← traits et types partagés entre tous les plugins
-│   ├── plugin_auth.rs                 ← plugin d'Authentification sur la base de données
-│   ├── plugin_sql/src/lib.rs          ← plugin MySQL générique (SELECT/INSERT/UPDATE/DELETE)
-│   ├── plugin_mongo/src/lib.rs        ← plugin MongoDB générique (find/insert/update/delete)
-│   ├── plugin_upload/src/lib.rs       ← plugin upload multipart → disque + MySQL
-├── src/main.rs                    ← démarrage serveur, pool MySQL, client MongoDB, précache plugins
-├── src/dispatcher.rs              ← résolution routes, extraction params, rendu html/json/redirect
+├── CLAUDE.md                        ← contexte pour Claude Code
+├── config_actions.json              ← annuaire des routes
+├── .env                             ← variables d'environnement
+├── Cargo.toml                       ← workspace Rust
+├── src/
+│   ├── main.rs                      ← démarrage, pools, précache plugins
+│   └── dispatcher.rs                ← résolution routes, rendu, auth
+├── plugins/
+│   ├── plugin-core/src/lib.rs       ← traits et types partagés (FFI)
+│   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources
+│   ├── plugin_mongo/src/lib.rs      ← MongoDB avec MongoContext autonome
+│   ├── plugin_auth/src/lib.rs       ← login / logout / JWT / sessions
+│   └── plugin_upload/src/lib.rs     ← upload multipart → disque + MySQL
+├── templates/
+│   ├── generics/                    ← templates réutilisables
+│   │   ├── tableGeneric.hbs         ← tableau de données générique
+│   │   ├── formGeneric.hbs          ← formulaire générique (inputs + selects)
+│   │   ├── listeGeneric.hbs         ← liste <select> générique
+│   │   ├── login.hbs                ← page de connexion
+│   │   ├── upload_form.hbs          ← formulaire d'upload
+│   │   ├── upload_list.hbs          ← liste des fichiers uploadés
+│   │   ├── index.hbs                ← page d'accueil
+│   │   ├── error.hbs                ← page d'erreur
+│   │   └── success.hbs              ← page de succès
+│   ├── partials/                    ← fragments réutilisables
+│   │   ├── header.hbs
+│   │   ├── nav.hbs
+│   │   └── footer.hbs
+│   └── specifics/                   ← templates spécifiques au projet
+│       └── form_countries.hbs
+├── public/
+│   ├── css/styles.css               ← styles globaux + formulaires
+│   └── images/                      ← favicon, logos
+├── uploads/                         ← fichiers uploadés (UUID.ext)
+├── resources/                       ← logos et schémas du framework
 └── sql/
-    ├── create_countries.sql       ← structure de la table countries pour tests
-    └── create_uploads.sql         ← structure de la table uploads pour tests
+    ├── create_countries.sql
+    └── create_uploads.sql
 ```
+
+---
 
 ## Flux d'une requête HTTP
 
@@ -53,94 +78,169 @@ small-folks/
 
 ```
 Client HTTP
-  ↓ GET /mongo/countries
-Tide (main.rs) — catch-all /*
+  ↓ GET /regions  (cookie session_id présent)
+Tide — catch-all /*
   ↓
-dispatcher.rs
-  ├─ resolve_action("GET", "/mongo/countries") → config_actions.json
-  ├─ extrait params URL / query string / body
-  ├─ construit ActionContext { sql, collection, filter, operation, params, ... }
+Dispatcher
+  ├─ resolve_action("GET", "/regions") → config_actions.json
+  ├─ extraction params URL + query string + body
+  ├─ injection cookie session_id → ctx.params
+  ├─ vérification auth (si "auth": true dans config)
+  │     → session cache → OK ou 401/redirect /login
   ↓
-SI auht = true → affichage login.hbs → plugin_auth.execute
-  ↓
-plugin_mongo.execute(ctx, state)      ← synchrone (contrainte FFI)
-  ├─ get_mongo_ctx() → MongoContext { rt: MONGO_RT, client }
-  ├─ block_in_place(|| MONGO_RT.block_on(op_find(...)))
+plugin_sql.execute(ctx, state)        ← synchrone (contrainte FFI cdylib)
+  ├─ block_in_place + handle.block_on
+  ├─ requête principale (ctx.sql)
+  ├─ requêtes ressources (ctx.sql_resources) si data_resources défini
   └─ PluginResult::Data(json)
   ↓
-dispatcher : return_type = "html" → hbs.render("tableGeneric", data)
+Dispatcher : rendu selon return_type
+  ├─ "html"     → hbs.render(view, data)
+  ├─ "json"     → HTTP 200 application/json
+  └─ "redirect" → HTTP 303 Location
   ↓
-HTTP 200 text/html
+HTTP response
 ```
 
-## config_actions.json — structure d'une action
+---
+
+## config_actions.json — référence complète
+
+### Champs disponibles
+
+| Champ | Type | Défaut | Description |
+|---|---|---|---|
+| `plugin` | string | — | Chemin vers le `.so` |
+| `sql` | string | — | Requête SQL avec `:param` |
+| `collection` | string | — | Collection MongoDB |
+| `filter` | string | `{}` | Filtre BSON JSON avec `:param` |
+| `operation` | string | `find` | Opération MongoDB |
+| `form_action` | string | — | URL action du formulaire HTML |
+| `data_resources` | objet | `{}` | `"nom_colonne" → "nom_ressource"` |
+| `sql_resources` | objet | `{}` | `"nom_ressource" → "SELECT ..."` |
+| `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Types MIME upload |
+| `max_size_mb` | string | `10` | Taille max upload en Mo |
+| `view` | string | — | Nom du template Handlebars |
+| `return_type` | string | `json` | `html`, `json` ou `redirect` |
+| `redirect_to` | string | `/` | URL de redirection |
+| `auth` | bool | `false` | Exige une session valide |
+
+### Règle template selon le cas d'usage
+
+| Cas | Template | Structure JSON reçue |
+|---|---|---|
+| Liste de données | `tableGeneric.hbs` | `[{...}]` → `{{#each this}}` |
+| Formulaire simple | `formGeneric.hbs` + `form_action` | `{ data: [{...}], form_action: "..." }` |
+| Formulaire avec selects | `formGeneric.hbs` + `form_action` + `data_resources` | `{ data: [{...}], resources: { field: [[val,lbl]] }, form_action: "..." }` |
+
+### Exemples de routes
 
 ```json
-"GET/countries/:code": {
-    "plugin":      "./target/release/libplugin_sql.so",
-    "sql":         "SELECT code, name_us FROM countries WHERE code = :code",
-    "view":        "tableGeneric.hbs",
-    "return_type": "html"
+{
+    "GET/countries": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",
+        "view": "generics/tableGeneric.hbs",
+        "return_type": "html"
+    },
+    "GET/regions": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT COALESCE(region,'Unknown') AS region, CAST(COUNT(*) AS CHAR) AS total FROM countries GROUP BY region",
+        "view": "generics/tableGeneric.hbs",
+        "return_type": "html",
+        "auth": true
+    },
+    "GET/view/user/:id": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT CAST(id_users AS CHAR) AS id_users, name, firstName, code_countries FROM users WHERE id_users = :id",
+        "view": "generics/formGeneric.hbs",
+        "form_action": "/users",
+        "return_type": "html",
+        "auth": true,
+        "data_resources": { "code_countries": "countries" },
+        "sql_resources":  { "countries": "SELECT code, name_fr FROM countries ORDER BY name_fr" }
+    },
+    "POST/login": {
+        "plugin": "./target/release/libplugin_auth.so",
+        "operation": "login",
+        "return_type": "redirect",
+        "redirect_to": "/index"
+    },
+    "GET/logout": {
+        "plugin": "./target/release/libplugin_auth.so",
+        "operation": "logout",
+        "return_type": "redirect",
+        "redirect_to": "/login"
+    },
+    "POST/upload": {
+        "plugin": "./target/release/libplugin_upload.so",
+        "allowed_mime": "image/jpeg,image/png,application/pdf",
+        "max_size_mb": "10",
+        "return_type": "redirect",
+        "redirect_to": "/uploads"
+    },
+    "GET/mongo/countries": {
+        "plugin": "./target/release/libplugin_mongo.so",
+        "collection": "countries",
+        "filter": "{}",
+        "operation": "find",
+        "view": "generics/tableGeneric.hbs",
+        "return_type": "html"
+    }
 }
 ```
 
-| Champ          | Valeurs                                  | Description                          |
-|----------------|------------------------------------------|--------------------------------------|
-| `plugin`       | chemin vers `.so`                        | Plugin à utiliser                    |
-| `sql`          | requête SQL avec `:param`                | Paramètres nommés pour plugin_sql    |
-| `collection`   | `"madb.macollection"` ou `"collection"`  | Collection MongoDB                   |
-| `filter`       | `"{\"region\": \":name\"}"`              | Filtre BSON avec `:param`            |
-| `operation`    | `find` `find_one` `insert_one` ...       | Opération MongoDB                    |
-| `allowed_mime` | `"image/jpeg,image/png,application/pdf"` | Types MIME autorisés (upload)        |
-| `max_size_mb`  | `"10"`                                   | Taille max en Mo (upload)            |
-| `view`         | nom du template `.hbs`                   | Ignoré si return_type ≠ html         |
-| `return_type`  | `html` `json` `redirect`                 | Mode de réponse                      |
-| `redirect_to`  | URL                                      | Destination si redirect              |
-| `auth       `  | true ou absent                           | Impose une authentif. à l'action     |
+---
 
-## plugin-core — types partagés
+## plugin-core — types partagés (FFI)
 
 ```rust
 pub struct AppState {
-    pub pool:   MySqlPool,      // pool MySQL partagé
-    pub handle: Handle,         // handle runtime Tokio principal
-    pub mongo:  Option<Client>, // client MongoDB (sert de flag "MongoDB activé")
-    /// Cache des sessions actives : session_id → SessionUser
-    /// Arc<Mutex> pour partage thread-safe entre handlers Tide
+    pub pool:     MySqlPool,
+    pub handle:   Handle,
+    pub mongo:    Option<mongodb::Client>,
     pub sessions: Arc<Mutex<HashMap<String, SessionUser>>>,
 }
 
 pub struct ActionContext {
-    pub sql:          String,              // requête SQL avec :param
-    pub collection:   String,              // collection MongoDB
-    pub filter:       String,              // filtre BSON JSON avec :param
-    pub operation:    String,              // find | find_one | insert_one | ...
-    pub upload_dir:   String,              // dossier destination upload
-    pub allowed_mime: String,              // types MIME autorisés
-    pub max_size_mb:  String,              // taille max en Mo
-    pub params:       HashMap<String, String>, // params URL + query + body
-    pub view:         String,              // nom template Handlebars
-    pub return_type:  String,              // html | json | redirect
-    pub redirect_to:  Option<String>,      // URL de redirect
-    pub body_bytes:   Vec<u8>,             // body brut (multipart)
-    pub content_type: String,              // Content-Type complet de la requête
-    pub form_action:  Option<String>,      // ← nouveau gère l'action d'un formulaire (ex.: "/insert_countries")
+    pub sql:            String,
+    pub collection:     String,
+    pub filter:         String,
+    pub operation:      String,
+    pub upload_dir:     String,
+    pub allowed_mime:   String,
+    pub max_size_mb:    String,
+    pub form_action:    Option<String>,
+    pub data_resources: HashMap<String, String>,  // "code_countries" → "countries"
+    pub sql_resources:  HashMap<String, String>,  // "countries" → "SELECT ..."
+    pub params:         HashMap<String, String>,
+    pub view:           String,
+    pub return_type:    String,
+    pub redirect_to:    Option<String>,
+    pub body_bytes:     Vec<u8>,
+    pub content_type:   String,
 }
 
-// Trait FFI — SYNCHRONE obligatoire (async_trait interdit sur cdylib)
+pub enum PluginResult {
+    Data(serde_json::Value),
+    Error(String),
+    AuthSuccess { session_id: String, jwt: String, redirect_to: String, user: Value },
+    AuthError(String),
+    AuthLogout { redirect_to: String },
+}
+
+// Trait FFI — execute() DOIT être synchrone (async_trait interdit)
 pub trait Plugin: Send + Sync {
     fn name(&self) -> &'static str;
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult;
 }
 ```
 
-## Règles critiques — frontière FFI cdylib
+---
 
-### execute() doit être SYNCHRONE
-`async fn` dans un trait FFI (`cdylib`) provoque un coredump en release.
-`async_trait` génère `Pin<Box<dyn Future>>` qui traverse la frontière FFI → vtables instables.
+## Règles critiques FFI cdylib
 
-### plugin_sql — pattern block_in_place + handle.block_on
+### plugin_sql — block_in_place + handle.block_on
 ```rust
 tokio::task::block_in_place(|| {
     state.handle.block_on(async {
@@ -148,104 +248,85 @@ tokio::task::block_in_place(|| {
     })
 })
 ```
-sqlx a besoin du runtime principal (handle) car il utilise fetch_all() qui ne fait qu'un seul aller-retour réseau → compatible avec block_on.
 
 ### plugin_mongo — MongoContext autonome (CRITIQUE)
+Le client MongoDB DOIT être créé dans `MONGO_RT`, pas dans `main.rs`.
+Sinon `block_in_place` de `plugin_sql` affame le heartbeat MongoDB → latence 1-8s.
+
 ```rust
 struct MongoContext { rt: Runtime, client: mongodb::Client }
 static MONGO_CTX: OnceLock<MongoContext> = OnceLock::new();
-```
-**Le client MongoDB DOIT être créé dans MONGO_RT, pas dans main.rs.**
 
-Raison : le driver MongoDB lance des tâches de fond (heartbeat, surveillance pool).
-Si le client est créé dans le runtime principal, ces tâches tournent sur ses threads.
-Quand plugin_sql appelle block_in_place, il affame ces tâches → heartbeat manqué
-→ pool dégradé → reconnexion → latence de 1-8s sur la requête suivante.
-
-En créant le client dans MONGO_RT, block_in_place du runtime principal n'a
-aucun impact sur MongoDB. Les deux runtimes sont totalement isolés.
-
-```rust
-// Utilisation dans execute()
+// Dans execute() :
 tokio::task::block_in_place(|| {
-    get_mongo_ctx().rt.block_on(async move {
-        // opérations MongoDB — s'exécutent dans MONGO_RT
-    })
+    get_mongo_ctx().rt.block_on(async move { ... })
 })
 ```
 
-### plugin_auth — Gestion de l'authentification via la base de données
+### Règles SQL
+- Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(COUNT(*) AS CHAR)`, `CAST(id AS CHAR)`, `CAST(created_at AS CHAR)`
+- Paramètres nommés `:param` convertis automatiquement en `?` positionnels
 
+### Cookies multiples avec Tide
 ```rust
-/// Informations utilisateur stockées dans le cache de sessions.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SessionUser {
-    pub id_users:      i64,
-    pub login:         String,
-    pub name:          String,
-    pub first_name:    String,
-    pub function:      String,
-    pub office:        String,
-    /// Timestamp Unix d'expiration (epoch secondes)
-    pub expires_at:    u64,
-}```
-
-### Règles SQL pour le plugin_sql générique
-- Toutes les colonnes de SELECT doivent être de type `CHAR`/`VARCHAR` ou castées
-- `CAST(COUNT(*) AS CHAR)` pour les agrégats
-- `CAST(created_at AS CHAR)` pour les dates
-- Sinon `try_get(i)` retourne `None` → `Null` dans le JSON
+// ❌ .header() deux fois → le second écrase le premier
+// ✅ insert_header() puis append_header()
+res.insert_header("Set-Cookie", "session_id=...; HttpOnly");
+res.append_header("Set-Cookie", "jwt_token=...");
+```
 
 ### Templates Handlebars Rust
-- `{{this}}` et non `{{.}}` (alias JS non supporté)
-- `{{#each this.0}}` / `{{@key}}` pour les en-têtes de colonnes génériques
-- Champs optionnels : `{{#if (lookup @root "nav_extra")}}` (évite l'erreur "Cannot access array with string index")
+- `{{this}}` et non `{{.}}`
+- `{{#each this.0}}` + `{{@key}}` pour les en-têtes génériques
+- `{{#if (lookup @root.resources @key)}}` pour afficher un `<select>` conditionnel
 - Partials : `{{> partials/header page_title="Titre"}}`
 
-## Variables .env
+---
 
-```bash
-DATABASE_URL=mysql://user:pass@localhost:3306/mabase
-HOST=127.0.0.1
-PORT=8080
-CONFIG_ACTIONS=./config_actions.json
-TEMPLATES_DIR=./templates
+## Authentification
 
-# MongoDB
-MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB=mabase
-MONGODB_USER=admin
-MONGODB_PASS=monpass
-MONGODB_AUTH_DB=admin
-
-# Upload
-UPLOAD_DIR=./uploads
+### Flux login
+```
+POST /login (login=x&mdp=y)
+  → plugin_auth.do_login()
+  → SELECT users WHERE login=? AND mdp=?
+  → OK : UUID session → cache mémoire + JWT HS256
+  → dispatcher : cookie session_id (HttpOnly) + jwt_token
+  → redirect vers next= ou LOGIN_REDIRECT
+  → KO : redirect /login?error=1
 ```
 
-## Compilation et lancement
+### Opérations plugin_auth
 
-```bash
-# Compilation release (obligatoire pour les performances)
-cargo build --release --all
+| Opération | Route conseillée | Description |
+|---|---|---|
+| `login` | `POST /login` | Authentifie, crée session + JWT |
+| `logout` | `GET /logout` | Supprime la session du cache |
+| `me` | `GET /api/me` | Retourne les infos de l'utilisateur courant (JSON) |
 
-# Lancement — vérifier que config_actions.json pointe vers target/release/
-./target/release/rust-plugin-tide
+### Protection d'une route
+```json
+"GET/ma-route": { "auth": true, ... }
+```
+- Non authentifié + `return_type: json` → HTTP 401
+- Non authentifié + `return_type: html` → redirect `/login?next=/ma-route`
+
+---
+
+## Upload de fichiers
+
+### Flux
+```
+POST /upload (multipart/form-data)
+  → plugin_upload.execute()
+  → validation MIME (allowed_mime)
+  → renommage UUID.ext
+  → écriture sur disque (UPLOAD_DIR)
+  → INSERT INTO uploads (...)
+  → redirect /uploads
 ```
 
-**Important** : `config_actions.json` le plugin doit pointer vers `./target/release/libplugin_xxx.so`.
-Mélanger binaire release et `.so` debug (ou inversement) provoque un coredump.
-
-## Performance observée (release, localhost)
-
-| Plugin      | Opération           | Latence  |
-|-------------|---------------------|----------|
-| plugin_auth | SELECT  1 lignes    | <= 1 ms  |
-| plugin_sql  | SELECT 243 lignes   | 1-5ms    |
-| plugin_mongo| find 243 documents  | 3-5ms    |
-| plugin_upload| upload 1 fichier   | < 10ms   |
-
-## Table MySQL uploads
-
+### Table MySQL uploads
 ```sql
 CREATE TABLE IF NOT EXISTS uploads (
     id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -255,9 +336,65 @@ CREATE TABLE IF NOT EXISTS uploads (
     mime_type   VARCHAR(100) NOT NULL,
     size_bytes  BIGINT       NOT NULL,
     upload_dir  VARCHAR(255) NOT NULL,
-    created_at  DATETIME     DEFAULT CURRENT_TIMESTAMP
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
+
+---
+
+## Variables d'environnement (.env)
+
+```bash
+HOST=0.0.0.0
+PORT=8080
+CONFIG_ACTIONS=./config_actions.json
+TEMPLATES_DIR=./templates
+DATABASE_URL=mysql://user:pass@localhost:3306/mabase
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB=mabase
+MONGODB_USER=admin
+MONGODB_PASS=monpass
+MONGODB_AUTH_DB=admin
+UPLOAD_DIR=./uploads
+JWT_SECRET=chaine-secrete-32-chars-minimum
+SESSION_TTL_SECONDS=3600
+LOGIN_REDIRECT=/index
+```
+
+---
+
+## Compilation et lancement
+
+```bash
+cargo build --release --all
+./target/release/rust-plugin-tide
+```
+
+Les `.so` dans `config_actions.json` doivent pointer vers `./target/release/`.
+Mélanger binaire release et `.so` debug provoque un coredump.
+
+---
+
+## Performances (release, localhost)
+
+| Plugin | Opération | Latence |
+|---|---|---|
+| plugin_sql | SELECT 243 lignes | 1-5ms |
+| plugin_mongo | find 243 documents | 3-5ms |
+| plugin_auth | login complet | ~1ms |
+| plugin_upload | upload 1 fichier | < 10ms |
+
+---
+
+## Routes système
+
+```
+GET /health   → {"status":"ok"}
+GET /images/* → public/images/
+GET /css/*    → public/css/
+GET /uploads/* → uploads/
+```
+
 <p align="center">
   <img src="https://mascaron.net/logo_small-folks-v2_50pc.png" alt="Logo Rust Framework small-Folks" />
 </p>

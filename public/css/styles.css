@@ -58,7 +58,7 @@ table.dataTable thead th {
     margin-right: auto;
 }
 
-/* ── Formulaire générique ────────────────────────────────── */
+/* ── Formulaire générique ──────────────────────────────────────── */
 .generic-form {
   max-width: 560px;
   margin: 2rem auto;
@@ -86,14 +86,27 @@ table.dataTable thead th {
   border-radius: 6px;
   font-size: 1rem;
   outline: none;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s;
   background: var(--color-background-primary, #fff);
   color: var(--color-text-primary, #222);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .form-input:focus {
   border-color: #534AB7;
   box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
+}
+
+/* Select hérite du même style que les inputs */
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  padding-right: 2.5rem;
+  cursor: pointer;
 }
 
 .form-actions {

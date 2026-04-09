@@ -1,5 +1,6 @@
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
-use sqlx::Column;
+use sqlx::{Column, Row};
+use serde_json::{json, Map, Value};
 
 pub struct PluginCountries;
 
@@ -12,10 +13,11 @@ impl Plugin for PluginCountries {
         // Convertit les paramètres nommés ":param" en "?" pour sqlx
         // et collecte les valeurs dans l'ordre d'apparition
         let (sql_prepared, param_values) = named_to_positional(&ctx.sql, &ctx.params);
+        let has_resources = !ctx.data_resources.is_empty();
 
         tokio::task::block_in_place(|| {
             state.handle.block_on(async {
-                // Construction dynamique de la requête avec binding des paramètres
+                // ── Requête principale ────────────────────────────────────────
                 let mut query = sqlx::query(&sql_prepared);
                 for val in &param_values {
                     query = query.bind(val);
@@ -24,36 +26,80 @@ impl Plugin for PluginCountries {
                 let sql_upper = ctx.sql.trim().to_uppercase();
 
                 if sql_upper.starts_with("SELECT") {
-                    // ── Lecture ────────────────────────────────────────────
-                    match query.fetch_all(&state.pool).await {
-                        Ok(rows) => {
-                            // Convertit les rows en tableau JSON générique
-                            let data: Vec<serde_json::Value> = rows.iter().map(|row| {
-                                use sqlx::Row;
-                                let mut obj = serde_json::Map::new();
-                                for (i, col) in row.columns().iter().enumerate() {
-                                    let val: Option<String> = row.try_get(i).ok();
-                                    obj.insert(
-                                        col.name().to_string(),
-                                        val.map(serde_json::Value::String) // NB: Les données en sortie de SQL doivent être des "CHAR"
-                                            .unwrap_or(serde_json::Value::Null),  // sinon on affecte Null à la valeur en sortie vers Handlebars
-                                    );
-                                }
-                                serde_json::Value::Object(obj)
-                            }).collect();
-                            PluginResult::Data(serde_json::Value::Array(data))
+                    let rows = match query.fetch_all(&state.pool).await {
+                        Ok(r)  => r,
+                        Err(e) => return PluginResult::Error(e.to_string()),
+                    };
+
+                    let data: Vec<Value> = rows.iter().map(|row| {
+                        let mut obj = Map::new();
+                        for (i, col) in row.columns().iter().enumerate() {
+                            let val: Option<String> = row.try_get(i).ok();
+                            obj.insert(
+                                col.name().to_string(),
+                                val.map(Value::String).unwrap_or(Value::Null),
+                            );
                         }
-                        Err(e) => PluginResult::Error(e.to_string()),
+                        Value::Object(obj)
+                    }).collect();
+
+                    // ── Sans ressources → retour simple (tableGeneric, etc.) ──
+                    if !has_resources {
+                        return PluginResult::Data(Value::Array(data));
                     }
+
+                    // ── Avec ressources → on exécute les sql_resources ────────
+                    // resources : { "code_countries": [["FR","France"], ...] }
+                    let mut resources: Map<String, Value> = Map::new();
+
+                    for (field_name, resource_name) in &ctx.data_resources {
+                        // Trouver le SQL associé à ce nom de ressource
+                        let sql_res = match ctx.sql_resources.get(resource_name) {
+                            Some(s) => s.clone(),
+                            None    => {
+                                eprintln!("[plugin_sql] sql_resources manquant pour '{}'", resource_name);
+                                continue;
+                            }
+                        };
+
+                        let res_rows = match sqlx::query(&sql_res)
+                            .fetch_all(&state.pool)
+                            .await
+                        {
+                            Ok(r)  => r,
+                            Err(e) => {
+                                eprintln!("[plugin_sql] Erreur ressource '{}' : {}", resource_name, e);
+                                continue;
+                            }
+                        };
+
+                        // Prend les deux premières colonnes : [valeur, label]
+                        // Si une seule colonne : valeur = label
+                        let pairs: Vec<Value> = res_rows.iter().map(|row| {
+                            let col0: Option<String> = row.try_get(0).ok();
+                            let col1: Option<String> = row.try_get(1).ok();
+                            let val   = col0.clone().unwrap_or_default();
+                            let label = col1.unwrap_or_else(|| col0.unwrap_or_default());
+                            json!([val, label])
+                        }).collect();
+
+                        resources.insert(field_name.clone(), Value::Array(pairs));
+                    }
+
+                    // Structure finale : { data: [...], resources: { field: [[val,lbl],...] } }
+                    PluginResult::Data(json!({
+                        "data":      data,
+                        "resources": resources,
+                        "form_action": ctx.form_action.clone().unwrap_or_default(),
+                    }))
+
                 } else {
-                    // ── Écriture (INSERT / UPDATE / DELETE) ────────────────
+                    // ── Écriture (INSERT / UPDATE / DELETE) ──────────────────
                     match query.execute(&state.pool).await {
-                        Ok(result) => {
-                            PluginResult::Data(serde_json::json!({
-                                "rows_affected": result.rows_affected(),
-                                "last_insert_id": result.last_insert_id(),
-                            }))
-                        }
+                        Ok(result) => PluginResult::Data(json!({
+                            "rows_affected":  result.rows_affected(),
+                            "last_insert_id": result.last_insert_id(),
+                        })),
                         Err(e) => PluginResult::Error(e.to_string()),
                     }
                 }

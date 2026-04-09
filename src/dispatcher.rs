@@ -19,6 +19,14 @@ pub struct ActionConfig {
     pub upload_dir:   Option<String>,
     pub allowed_mime: Option<String>,
     pub max_size_mb:  Option<String>,
+     // Ressources pour listes déroulantes
+    // data_resources : { "nom_colonne": "nom_ressource" }
+    #[serde(default)]
+    pub data_resources: std::collections::HashMap<String, String>,
+    // sql_resources : { "nom_ressource": "SELECT ..." }
+    #[serde(default)]
+    pub sql_resources:  std::collections::HashMap<String, String>,
+
     // Rendu
     pub view:         Option<String>,
     pub return_type:  Option<String>,
@@ -124,6 +132,8 @@ impl Dispatcher {
             allowed_mime: action.allowed_mime.clone()
                 .unwrap_or_else(|| "image/jpeg,image/png,application/pdf".to_string()),
             max_size_mb:  action.max_size_mb.clone().unwrap_or_else(|| "10".to_string()),
+            data_resources: action.data_resources.clone(),
+            sql_resources:  action.sql_resources.clone(),
             params,
             view:         action.view.clone().unwrap_or_default(),
             return_type:  action.return_type.clone().unwrap_or_else(|| "json".to_string()),
@@ -257,11 +267,31 @@ impl Dispatcher {
                 }
                 "html" => {
                     let view_name = ctx.view.trim_end_matches(".hbs");
-
+                    // DEBUG temporaire — à supprimer après diagnostic
+                   /* println!("[dispatcher] data envoyée au template '{}' :\n{}", 
+                        view_name, 
+                        serde_json::to_string_pretty(&data).unwrap_or_default()
+                    );*/
                     // Injecter form_action dans les données si défini
                     let data = if let Some(fa) = &ctx.form_action {
-                        match data {
-                            serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                        match &data {
+                            // plugin_sql a déjà retourné { data, resources, form_action }
+                            // → on ne re-wrappe pas, on complète juste si form_action manque
+                            serde_json::Value::Object(map) => {
+                                if map.contains_key("data") {
+                                    // Déjà enrichi par plugin_sql — form_action est dedans, rien à faire
+                                    data
+                                } else {
+                                    // Object simple → on wrappe
+                                    let mut wrapper = serde_json::Map::new();
+                                    wrapper.insert("data".to_string(), data);
+                                    wrapper.insert("form_action".to_string(),
+                                        serde_json::Value::String(fa.clone()));
+                                    serde_json::Value::Object(wrapper)
+                                }
+                            }
+                            // Array simple (pas de data_resources) → on wrappe
+                            serde_json::Value::Array(_) => {
                                 let mut wrapper = serde_json::Map::new();
                                 wrapper.insert("data".to_string(), data);
                                 wrapper.insert("form_action".to_string(),
@@ -283,17 +313,6 @@ impl Dispatcher {
                             &format!("Erreur template '{}' : {}", view_name, e)),
                     }
                 }
-                /*"html" => {
-                    let view_name = ctx.view.trim_end_matches(".hbs");
-                    match self.hbs.render(view_name, &data) {
-                        Ok(html) => Ok(Response::builder(200)
-                            .body(html)
-                            .content_type("text/html;charset=utf-8")
-                            .build()),
-                        Err(e) => self.render_error(500,
-                            &format!("Erreur template '{}' : {}", view_name, e)),
-                    }
-                }*/
                 "redirect" => {
                     let target = ctx.redirect_to.as_deref().unwrap_or("/");
                     Ok(Response::builder(303)
