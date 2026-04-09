@@ -6,6 +6,7 @@ members = [
     "plugins/plugin_sql",
     "plugins/plugin_mongo",
     "plugins/plugin_upload",
+    "plugins/plugin_health",
 ]
 
 [package]

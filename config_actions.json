@@ -9,7 +9,8 @@
         "plugin": "",
         "sql": "",
         "view": "generics/index.hbs",
-        "return_type": "html"
+        "return_type": "html",
+        "auth": true
     },
     "GET/login": {
         "plugin":      "",
@@ -31,6 +32,24 @@
     "GET/api/me": {
         "plugin":      "./target/release/libplugin_auth.so",
         "operation":   "me",
+        "return_type": "json"
+    },
+    "GET/health": {
+        "plugin":      "./target/release/libplugin_health.so",
+        "operation":   "status",
+        "return_type": "json"
+    },
+    "GET/health/dashboard": {
+        "plugin":      "./target/release/libplugin_health.so",
+        "operation":   "dashboard",
+        "view":        "generics/health_dashboard.hbs",
+        "return_type": "html",
+        "auth":        true
+    },
+    "GET/api/health": {
+        "plugin":      "./target/release/libplugin_health.so",
+        "operation":   "dashboard",
+        "view":        "generics/health_dashboard.hbs",
         "return_type": "json"
     },
     "GET/view/user/:id": {

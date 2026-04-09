@@ -1,0 +1,138 @@
+{{> partials/header page_title="Health Dashboard"}}
+{{> partials/nav}}
+
+<div class="container">
+
+  {{!-- Statut global --}}
+  <div style="display:flex; align-items:center; gap:1rem; margin:1.5rem 0;">
+    {{#if (eq status "ok")}}
+      <span style="width:14px;height:14px;border-radius:50%;background:#1D9E75;display:inline-block;"></span>
+      <span style="font-size:1.1rem; font-weight:500; color:#1D9E75;">Serveur opérationnel</span>
+    {{else}}
+      <span style="width:14px;height:14px;border-radius:50%;background:#D85A30;display:inline-block;"></span>
+      <span style="font-size:1.1rem; font-weight:500; color:#D85A30;">Attention requise</span>
+    {{/if}}
+    <span style="color:#888; font-size:.85rem;">uptime : {{uptime.formatted}}</span>
+  </div>
+
+  {{!-- Grille de métriques --}}
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1.2rem; margin-bottom:2rem;">
+
+    {{!-- Sessions --}}
+    <div class="card-metric">
+      <div class="metric-title">Sessions</div>
+      <div class="metric-value">{{sessions.active}}</div>
+      <div class="metric-sub">actives sur {{sessions.total}} en cache</div>
+      <div class="metric-bar-wrap">
+        <div class="metric-bar" style="width:{{sessions.active}}%; background:#534AB7;"></div>
+      </div>
+      <div class="metric-hint">expirées : {{sessions.expired}}</div>
+    </div>
+
+    {{!-- Bases de données --}}
+    <div class="card-metric">
+      <div class="metric-title">Bases de données</div>
+
+      {{!-- MySQL --}}
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:.6rem;">
+        <div style="display:flex; align-items:center; gap:.5rem;">
+          {{#if (eq databases.mysql.status "ok")}}
+            <span style="width:10px;height:10px;border-radius:50%;background:#1D9E75;display:inline-block;flex-shrink:0;"></span>
+          {{else}}
+            <span style="width:10px;height:10px;border-radius:50%;background:#D85A30;display:inline-block;flex-shrink:0;"></span>
+          {{/if}}
+          <span class="metric-sub" style="font-weight:500;">MySQL</span>
+        </div>
+        {{#if (eq databases.mysql.status "ok")}}
+          <span class="metric-hint" style="color:#1D9E75;">{{databases.mysql.latency_ms}} ms</span>
+        {{else}}
+          <span class="metric-hint" style="color:#D85A30;">{{databases.mysql.error}}</span>
+        {{/if}}
+      </div>
+
+      {{!-- MongoDB --}}
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-top:.5rem;">
+        <div style="display:flex; align-items:center; gap:.5rem;">
+          {{#if (eq databases.mongodb.status "ok")}}
+            <span style="width:10px;height:10px;border-radius:50%;background:#1D9E75;display:inline-block;flex-shrink:0;"></span>
+          {{else if (eq databases.mongodb.status "disabled")}}
+            <span style="width:10px;height:10px;border-radius:50%;background:#888;display:inline-block;flex-shrink:0;"></span>
+          {{else}}
+            <span style="width:10px;height:10px;border-radius:50%;background:#D85A30;display:inline-block;flex-shrink:0;"></span>
+          {{/if}}
+          <span class="metric-sub" style="font-weight:500;">MongoDB</span>
+        </div>
+        {{#if (eq databases.mongodb.status "ok")}}
+          <span class="metric-hint" style="color:#1D9E75;">{{databases.mongodb.latency_ms}} ms</span>
+        {{else if (eq databases.mongodb.status "disabled")}}
+          <span class="metric-hint">désactivé</span>
+        {{else}}
+          <span class="metric-hint" style="color:#D85A30;">{{databases.mongodb.error}}</span>
+        {{/if}}
+      </div>
+
+    </div>
+
+    {{!-- RAM --}}
+    <div class="card-metric">
+      <div class="metric-title">Mémoire RAM</div>
+      <div class="metric-value">{{memory.usage_percent}}<span class="metric-unit">%</span></div>
+      <div class="metric-sub">{{memory.used_mb}} Mo utilisés sur {{memory.total_mb}} Mo</div>
+      <div class="metric-bar-wrap">
+        {{#if (gt memory.usage_percent 85)}}
+          <div class="metric-bar" style="width:{{memory.usage_percent}}%; background:#D85A30;"></div>
+        {{else if (gt memory.usage_percent 65)}}
+          <div class="metric-bar" style="width:{{memory.usage_percent}}%; background:#BA7517;"></div>
+        {{else}}
+          <div class="metric-bar" style="width:{{memory.usage_percent}}%; background:#1D9E75;"></div>
+        {{/if}}
+      </div>
+      <div class="metric-hint">libre : {{memory.free_mb}} Mo</div>
+    </div>
+
+    {{!-- Disque --}}
+    <div class="card-metric">
+      <div class="metric-title">Disque <span style="font-weight:400;font-size:.8rem;">({{disk.mount}})</span></div>
+      <div class="metric-value">{{disk.usage_percent}}<span class="metric-unit">%</span></div>
+      <div class="metric-sub">{{disk.used_gb}} Go utilisés sur {{disk.total_gb}} Go</div>
+      <div class="metric-bar-wrap">
+        {{#if (gt disk.usage_percent 85)}}
+          <div class="metric-bar" style="width:{{disk.usage_percent}}%; background:#D85A30;"></div>
+        {{else if (gt disk.usage_percent 65)}}
+          <div class="metric-bar" style="width:{{disk.usage_percent}}%; background:#BA7517;"></div>
+        {{else}}
+          <div class="metric-bar" style="width:{{disk.usage_percent}}%; background:#1D9E75;"></div>
+        {{/if}}
+      </div>
+      <div class="metric-hint">libre : {{disk.free_gb}} Go</div>
+    </div>
+
+    {{!-- Uptime --}}
+    <div class="card-metric">
+      <div class="metric-title">Uptime système</div>
+      <div class="metric-value" style="font-size:1.8rem;">{{uptime.formatted}}</div>
+      <div class="metric-sub">{{uptime.seconds}} secondes</div>
+      <div class="metric-hint" style="margin-top:.8rem;">
+        <a href="/api/health" style="color:#534AB7; font-size:.85rem;">voir JSON brut</a>
+      </div>
+    </div>
+
+  </div>
+
+  {{!-- Bouton refresh --}}
+  <div style="text-align:center; margin-top:1rem;">
+    <button onclick="window.location.reload()"
+            style="padding:.5rem 1.4rem; background:#534AB7; color:#fff;
+                   border:none; border-radius:6px; cursor:pointer; font-size:.9rem;">
+      Rafraîchir
+    </button>
+    <a href="/api/health"
+       style="margin-left:1rem; padding:.5rem 1.4rem; border:1px solid #ccc;
+              border-radius:6px; font-size:.9rem; color:#555; text-decoration:none;">
+      JSON brut
+    </a>
+  </div>
+
+</div>
+
+{{> partials/footer}}
