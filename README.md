@@ -30,7 +30,7 @@ Routes, requêtes SQL/MongoDB, vues et ressources entièrement configurées dans
 
 ```
 small-folks/
-├── README.md                        ← contexte pour Claude Code
+├── README.md                        ← ce fichier
 ├── config_actions.json              ← annuaire des routes
 ├── .env                             ← variables d'environnement
 ├── Cargo.toml                       ← workspace Rust
