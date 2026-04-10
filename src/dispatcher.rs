@@ -6,6 +6,9 @@ use std::sync::Arc;
 use tide::{Request, Response};
 
 /// Structure d'une action dans config_actions.json
+fn default_form_columns() -> u8 { 1 }
+
+/// Structure d'une action dans config_actions.json
 #[derive(Debug, Deserialize, Clone)]
 pub struct ActionConfig {
     pub plugin:       Option<String>,
@@ -36,6 +39,11 @@ pub struct ActionConfig {
     pub auth:         bool,
     #[serde(default)]
     pub form_action: Option<String>,   // ← nouveau
+    #[serde(default = "default_form_columns")]
+    pub form_columns: u8,
+    // Champs qui occupent toute la largeur même en mode 2 colonnes
+    #[serde(default)]
+    pub form_fullwidth_fields: Vec<String>,
 }
 
 pub struct Dispatcher {
@@ -141,6 +149,8 @@ impl Dispatcher {
             body_bytes,
             content_type,
             form_action: action.form_action.clone(),   // ← nouveau
+             form_columns:            action.form_columns,
+            form_fullwidth_fields:   action.form_fullwidth_fields.clone(),
         };
 
         // ── Vérification authentification ────────────────────────────────────
@@ -272,31 +282,35 @@ impl Dispatcher {
                         view_name, 
                         serde_json::to_string_pretty(&data).unwrap_or_default()
                     );*/
-                    // Injecter form_action dans les données si défini
+                    // Injecter form_action + form_columns + form_fullwidth_fields
+                    // si défini et que les données ne sont pas déjà enrichies par plugin_sql
                     let data = if let Some(fa) = &ctx.form_action {
                         match &data {
-                            // plugin_sql a déjà retourné { data, resources, form_action }
-                            // → on ne re-wrappe pas, on complète juste si form_action manque
-                            serde_json::Value::Object(map) => {
-                                if map.contains_key("data") {
-                                    // Déjà enrichi par plugin_sql — form_action est dedans, rien à faire
-                                    data
-                                } else {
-                                    // Object simple → on wrappe
-                                    let mut wrapper = serde_json::Map::new();
-                                    wrapper.insert("data".to_string(), data);
-                                    wrapper.insert("form_action".to_string(),
-                                        serde_json::Value::String(fa.clone()));
-                                    serde_json::Value::Object(wrapper)
-                                }
-                            }
-                            // Array simple (pas de data_resources) → on wrappe
-                            serde_json::Value::Array(_) => {
-                                let mut wrapper = serde_json::Map::new();
-                                wrapper.insert("data".to_string(), data);
-                                wrapper.insert("form_action".to_string(),
+                            serde_json::Value::Object(map) if map.contains_key("data") => data,
+                            serde_json::Value::Array(arr) => {
+                                // Enrichir chaque record avec le flag fullwidth par champ
+                                let fullwidth_set: std::collections::HashSet<&String> =
+                                    ctx.form_fullwidth_fields.iter().collect();
+                                let data_with_meta: Vec<serde_json::Value> = arr.iter()
+                                    .map(|row| {
+                                        if let serde_json::Value::Object(obj) = row {
+                                            let fields: Vec<serde_json::Value> = obj.iter()
+                                                .map(|(k, v)| serde_json::json!({
+                                                    "key":       k,
+                                                    "value":     v,
+                                                    "fullwidth": fullwidth_set.contains(k),
+                                                }))
+                                                .collect();
+                                            serde_json::json!({ "fields": fields })
+                                        } else { row.clone() }
+                                    }).collect();
+                                let mut w = serde_json::Map::new();
+                                w.insert("data".into(), serde_json::Value::Array(data_with_meta));
+                                w.insert("form_action".into(),
                                     serde_json::Value::String(fa.clone()));
-                                serde_json::Value::Object(wrapper)
+                                w.insert("form_columns".into(),
+                                    serde_json::Value::Number(ctx.form_columns.into()));
+                                serde_json::Value::Object(w)
                             }
                             _ => data,
                         }

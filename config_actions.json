@@ -57,6 +57,8 @@
         "sql":         "SELECT CAST(id_users AS CHAR), name, firstName, login, function, office, code_countries FROM users WHERE id_users = :id",
         "view":        "generics/formGeneric.hbs",
         "form_action": "/update_user",
+        "form_columns": 2,
+        "form_fullwidth_fields": ["addresse1", "addresse2", "city"],
         "return_type": "html",
         "auth":        true,
         "data_resources": {
@@ -80,6 +82,8 @@
         "view": "generics/formGeneric.hbs",
         "return_type": "html",
         "form_action": "/insert_user",
+        "form_columns": 2,
+        "form_fullwidth_fields": ["addresse1", "addresse2", "city"],
         "auth":        true,
         "data_resources": {
             "code_countries": "countries",

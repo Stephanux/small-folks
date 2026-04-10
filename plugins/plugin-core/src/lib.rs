@@ -59,7 +59,12 @@ pub struct ActionContext {
     pub content_type: String,
     pub data_resources: HashMap<String, String>,  // "code_countries" → "countries"
     pub sql_resources:  HashMap<String, String>,  // "countries" → "SELECT code, name_fr..."
+    // Formulaire générique
     pub form_action:    Option<String>,           // ← nouveau gère l'action d'un formulaire (ex.: "/countrie")
+    /// Nombre de colonnes : 1 (défaut) ou 2
+    pub form_columns:          u8,
+    /// Champs affichés sur toute la largeur en mode 2 colonnes
+    pub form_fullwidth_fields: Vec<String>,
 }
 /// Résultat retourné par un plugin au dispatcher.
 pub enum PluginResult {

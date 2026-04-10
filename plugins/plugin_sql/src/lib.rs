@@ -5,9 +5,7 @@ use serde_json::{json, Map, Value};
 pub struct PluginCountries;
 
 impl Plugin for PluginCountries {
-    fn name(&self) -> &'static str {
-        "sql"
-    }
+    fn name(&self) -> &'static str { "sql" }
 
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
         // Convertit les paramètres nommés ":param" en "?" pour sqlx
@@ -86,11 +84,34 @@ impl Plugin for PluginCountries {
                         resources.insert(field_name.clone(), Value::Array(pairs));
                     }
 
+                    // Construire le tableau data enrichi avec le flag fullwidth
+                    // pour chaque champ — le template peut faire {{#if fullwidth}}
+                    // sans avoir à remonter dans le contexte parent (limitation Handlebars Rust)
+                    let fullwidth_set: std::collections::HashSet<&String> =
+                        ctx.form_fullwidth_fields.iter().collect();
+
+                    let data_with_meta: Vec<Value> = data.into_iter().map(|row| {
+                        if let Value::Object(obj) = row {
+                            // Pour chaque record, construire la liste des champs
+                            // avec leur valeur et leur flag fullwidth
+                            let fields: Vec<Value> = obj.into_iter().map(|(k, v)| {
+                                json!({
+                                    "key":       k.clone(),
+                                    "value":     v,
+                                    "fullwidth": fullwidth_set.contains(&k),
+                                })
+                            }).collect();
+                            json!({ "fields": fields })
+                        } else {
+                            row
+                        }
+                    }).collect();
                     // Structure finale : { data: [...], resources: { field: [[val,lbl],...] } }
                     PluginResult::Data(json!({
-                        "data":      data,
+                        "data":      data_with_meta,
                         "resources": resources,
                         "form_action": ctx.form_action.clone().unwrap_or_default(),
+                        "form_columns": ctx.form_columns,
                     }))
 
                 } else {
