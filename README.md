@@ -5,7 +5,7 @@
 </p>
 
 Framework web **Rust** basé sur **Tide** avec un système de plugins dynamiques (`cdylib`).
-Routes, requêtes SQL/MongoDB, vues et ressources entièrement configurées dans `config_actions.json` **sans recompilation**.
+Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées dans `config_actions.json` **sans recompilation**.
 
 ---
 
@@ -114,9 +114,11 @@ HTTP response
 | `sql` | string | — | Requête SQL avec `:param` |
 | `collection` | string | — | Collection MongoDB |
 | `filter` | string | `{}` | Filtre BSON JSON avec `:param` |
-| `operation` | string | `find` | Opération MongoDB |
-| `form_action` | string | — | URL action du formulaire HTML |
-| `data_resources` | objet | `{}` | `"nom_colonne" → "nom_ressource"` |
+| `operation` | string | `find` | Opération MongoDB ou auth (`login`, `logout`, `me`, `status`, `dashboard`) |
+| `form_action` | string | — | URL `action=""` du formulaire HTML |
+| `form_columns` | number | `1` | Nombre de colonnes du formulaire : `1` ou `2` |
+| `form_fullwidth_fields` | array | `[]` | Champs sur toute la largeur en mode 2 colonnes |
+| `data_resources` | objet | `{}` | `"nom_colonne" → "nom_ressource"` pour les selects |
 | `sql_resources` | objet | `{}` | `"nom_ressource" → "SELECT ..."` |
 | `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Types MIME upload |
 | `max_size_mb` | string | `10` | Taille max upload en Mo |
@@ -130,8 +132,31 @@ HTTP response
 | Cas | Template | Structure JSON reçue |
 |---|---|---|
 | Liste de données | `tableGeneric.hbs` | `[{...}]` → `{{#each this}}` |
-| Formulaire simple | `formGeneric.hbs` + `form_action` | `{ data: [{...}], form_action: "..." }` |
-| Formulaire avec selects | `formGeneric.hbs` + `form_action` + `data_resources` | `{ data: [{...}], resources: { field: [[val,lbl]] }, form_action: "..." }` |
+| Formulaire 1 colonne | `formGeneric.hbs` + `form_action` | `{ data: [{fields:[{key,value,fullwidth}]}], form_action, form_columns:1 }` |
+| Formulaire 2 colonnes | `formGeneric.hbs` + `form_columns:2` | idem + champs fullwidth marqués `true` |
+| Formulaire avec selects | idem + `data_resources` | idem + `resources: { field: [[val,lbl]] }` |
+
+### Structure JSON envoyée à formGeneric.hbs
+
+```json
+{
+  "form_action":  "/users",
+  "form_columns": 2,
+  "data": [
+    {
+      "fields": [
+        { "key": "name",      "value": "Mascaron", "fullwidth": false },
+        { "key": "firstName", "value": "Stéphane", "fullwidth": false },
+        { "key": "addresse1", "value": "Rue ...",  "fullwidth": true  },
+        { "key": "city",      "value": "Mont...",  "fullwidth": true  }
+      ]
+    }
+  ],
+  "resources": {
+    "code_countries": [["FR", "France"], ["DE", "Allemagne"]]
+  }
+}
+```
 
 ### Exemples de routes
 
@@ -151,10 +176,12 @@ HTTP response
         "auth": true
     },
     "GET/view/user/:id": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT CAST(id_users AS CHAR) AS id_users, name, firstName, code_countries FROM users WHERE id_users = :id",
-        "view": "generics/formGeneric.hbs",
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id_users AS CHAR) AS id, name, firstName, login, function, office, code_countries, addresse1, addresse2, cp, city FROM users WHERE id_users = :id",
+        "view":        "generics/formGeneric.hbs",
         "form_action": "/users",
+        "form_columns": 2,
+        "form_fullwidth_fields": ["addresse1", "addresse2", "city"],
         "return_type": "html",
         "auth": true,
         "data_resources": { "code_countries": "countries" },
@@ -178,6 +205,18 @@ HTTP response
         "max_size_mb": "10",
         "return_type": "redirect",
         "redirect_to": "/uploads"
+    },
+    "GET/health": {
+        "plugin": "./target/release/libplugin_health.so",
+        "operation": "status",
+        "return_type": "json"
+    },
+    "GET/health/dashboard": {
+        "plugin": "./target/release/libplugin_health.so",
+        "operation": "dashboard",
+        "view": "generics/health_dashboard.hbs",
+        "return_type": "html",
+        "auth": true
     },
     "GET/mongo/countries": {
         "plugin": "./target/release/libplugin_mongo.so",
@@ -203,22 +242,24 @@ pub struct AppState {
 }
 
 pub struct ActionContext {
-    pub sql:            String,
-    pub collection:     String,
-    pub filter:         String,
-    pub operation:      String,
-    pub upload_dir:     String,
-    pub allowed_mime:   String,
-    pub max_size_mb:    String,
-    pub form_action:    Option<String>,
-    pub data_resources: HashMap<String, String>,  // "code_countries" → "countries"
-    pub sql_resources:  HashMap<String, String>,  // "countries" → "SELECT ..."
-    pub params:         HashMap<String, String>,
-    pub view:           String,
-    pub return_type:    String,
-    pub redirect_to:    Option<String>,
-    pub body_bytes:     Vec<u8>,
-    pub content_type:   String,
+    pub sql:                   String,
+    pub collection:            String,
+    pub filter:                String,
+    pub operation:             String,
+    pub upload_dir:            String,
+    pub allowed_mime:          String,
+    pub max_size_mb:           String,
+    pub form_action:           Option<String>,
+    pub form_columns:          u8,               // 1 (défaut) ou 2
+    pub form_fullwidth_fields: Vec<String>,       // champs pleine largeur en mode 2 col
+    pub data_resources:        HashMap<String, String>,
+    pub sql_resources:         HashMap<String, String>,
+    pub params:                HashMap<String, String>,
+    pub view:                  String,
+    pub return_type:           String,
+    pub redirect_to:           Option<String>,
+    pub body_bytes:            Vec<u8>,
+    pub content_type:          String,
 }
 
 pub enum PluginResult {
@@ -283,6 +324,37 @@ res.append_header("Set-Cookie", "jwt_token=...");
 
 ---
 
+## Formulaire générique — mode 2 colonnes
+
+Le formulaire générique supporte 1 ou 2 colonnes via CSS Grid, configurable par route.
+
+### Fonctionnement
+
+`plugin_sql` enrichit chaque champ avec un flag `fullwidth: bool` calculé depuis `form_fullwidth_fields` :
+
+```
+config_actions.json          plugin_sql                   formGeneric.hbs
+─────────────────────        ──────────────               ───────────────────────
+form_columns: 2          →   data[0].fields = [       →   {{#each data.0.fields}}
+form_fullwidth_fields:         {key:"name",    fw:false}     {{#if fullwidth}} ← class
+  ["addresse1","city"]         {key:"addresse1",fw:true }    {{/if}}
+                               {key:"city",    fw:true }   {{/each}}
+                             ]
+```
+
+### CSS Grid appliqué
+
+```css
+.form-2col { grid-template-columns: 1fr 1fr; }
+.form-2col .form-group-full { grid-column: 1 / -1; }
+
+@media (max-width: 640px) {
+  .form-2col { grid-template-columns: 1fr; }
+}
+```
+
+---
+
 ## Authentification
 
 ### Flux login
@@ -342,6 +414,36 @@ CREATE TABLE IF NOT EXISTS uploads (
 
 ---
 
+## Health check (plugin_health)
+
+### Routes
+```
+GET /health              → JSON brut (monitoring)
+GET /health/dashboard    → HTML dashboard (auth: true conseillé)
+```
+
+### JSON retourné
+```json
+{
+  "status": "ok",
+  "sessions":  { "active": 2, "expired": 0, "total": 2 },
+  "databases": {
+    "mysql":   { "status": "ok", "latency_ms": 1 },
+    "mongodb": { "status": "ok", "latency_ms": 3 }
+  },
+  "memory":  { "total_mb": 16000, "used_mb": 8000, "free_mb": 8000, "usage_percent": 50 },
+  "disk":    { "mount": "/", "total_gb": 500, "used_gb": 120, "free_gb": 380, "usage_percent": 24 },
+  "uptime":  { "seconds": 3600, "formatted": "1h 0min" }
+}
+```
+
+`status` passe en `"warning"` si MySQL ou MongoDB KO, ou si RAM/disque > 90%.
+MongoDB désactivé (`"status": "disabled"`) n'est pas considéré comme une erreur.
+
+**Note** : `plugin_health` utilise `HealthContext` avec son propre runtime Tokio (`HEALTH_RT`) pour le ping MongoDB — même pattern que `plugin_mongo` pour éviter la contention sur le runtime principal.
+
+---
+
 ## Variables d'environnement (.env)
 
 ```bash
@@ -389,10 +491,11 @@ Mélanger binaire release et `.so` debug provoque un coredump.
 ## Routes système
 
 ```
-GET /health   → {"status":"ok"}
-GET /images/* → public/images/
-GET /css/*    → public/css/
-GET /uploads/* → uploads/
+GET /health            → {"status":"ok"} JSON
+GET /health/dashboard  → dashboard HTML
+GET /images/*          → public/images/
+GET /css/*             → public/css/
+GET /uploads/*         → uploads/
 ```
 
 <p align="center">
