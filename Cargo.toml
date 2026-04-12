@@ -10,10 +10,10 @@ members = [
 ]
 
 [package]
-name = "rust-plugin-tide"
+name = "small-folks"
 authors = ["Stephane MASCARON <stephane@mascaron.net>"]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 plugin-core  = { path = "plugins/plugin-core" }

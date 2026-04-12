@@ -469,7 +469,7 @@ LOGIN_REDIRECT=/index
 
 ```bash
 cargo build --release --all
-./target/release/rust-plugin-tide
+./target/release/small-folks
 ```
 
 Les `.so` dans `config_actions.json` doivent pointer vers `./target/release/`.
