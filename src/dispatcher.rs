@@ -38,7 +38,7 @@ pub struct ActionConfig {
     #[serde(default)]
     pub auth:         bool,
     #[serde(default)]
-    pub form_action: Option<String>,   // ← nouveau
+    pub form_action: Option<String>,   // ← nouveau action a placer dans l'attribut du même nom du formulaire.
     #[serde(default = "default_form_columns")]
     pub form_columns: u8,
     // Champs qui occupent toute la largeur même en mode 2 colonnes
