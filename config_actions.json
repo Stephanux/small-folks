@@ -78,8 +78,8 @@
     },
     "GET/view/user": {
         "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone FROM users LIMIT 1",
-        "view": "generics/formGeneric.hbs",
+        "sql": "SELECT name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone, image FROM users LIMIT 1",
+        "view": "specifics/form_user.hbs",
         "return_type": "html",
         "form_action": "/insert_user",
         "form_columns": 2,
@@ -95,11 +95,14 @@
         }
     },
     "POST/insert_user": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "INSERT INTO users (name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone) VALUES (:name, :firstName, :login, :mdp, :function, :office, :date_naiss, :addresse1, :addresse2, :cp, :city,:code_countries, :mobile_phone, :home_phone)",
-        "view": "",
-        "return_type": "redirect",
-        "redirect_to": "/users"
+        "plugin":        "./target/release/libplugin_sql_upload.so",
+        "sql":           "INSERT INTO users (name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone, image) VALUES (:name, :firstName, :login, :mdp, :function, :office, :date_naiss, :addresse1, :addresse2, :cp, :city,:code_countries, :mobile_phone, :home_phone, :image)",
+        "upload_field":  "image",
+        "allowed_mime":  "image/jpeg,image/png,image/webp",
+        "max_size_mb":   "5",
+        "return_type":   "redirect",
+        "redirect_to":   "/users",
+        "auth":          true
     },
     "POST/update_user": {
         "plugin": "./target/release/libplugin_sql.so",

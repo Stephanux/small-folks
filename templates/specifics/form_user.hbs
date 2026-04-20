@@ -1,0 +1,68 @@
+{{> partials/header page_title="Formulaire"}}
+{{> partials/nav}}
+
+<div class="container">
+  <form id="formgeneric" class="generic-form {{#if (eq form_columns 2)}}form-2col{{/if}}"
+        method="POST" action="{{form_action}}" enctype="multipart/form-data">
+    {{!--
+      En mode 2 colonnes, certains champs peuvent être forcés pleine largeur
+      via la liste form_fullwidth_fields.
+      On utilise un helper Handlebars natif : (lookup @root.form_fullwidth_fields @key)
+      ne fonctionne pas pour un tableau — on utilise donc une classe CSS et
+      on laisse le CSS gérer via :nth-child si besoin, OU on entoure chaque champ
+      d'un div dont la classe est conditionnelle.
+      Solution retenue : data-fullwidth="true/false" + CSS selector
+    --}}
+    {{#each data.0.fields}}
+    <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
+
+      <label class="form-label" for="{{key}}">{{key}}</label>
+
+      {{#if (lookup @root.resources key)}}
+        <select class="form-input form-select" id="{{key}}" name="{{key}}">
+          <option value="">-- choisir --</option>
+          {{#each (lookup @root.resources key)}}
+            <option value="{{this.[0]}}">{{this.[1]}}</option>
+          {{/each}}
+        </select>
+      {{else}}
+        {{#if (eq key "image")}}
+            <label for="file" style="display:block; margin-bottom:.4rem; font-weight:500;">
+                Fichier (jpg, png, pdf — max 5 Mo)
+            </label>
+            <input type="file" id="image" name="image"
+                accept=".jpg,.jpeg,.png,.pdf"
+                style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
+        {{else}}
+            <input class="form-input" type="text" id="{{key}}" name="{{key}}" value="{{value}}">
+        {{/if}}
+      {{/if}}
+      
+    </div>
+    {{/each}}
+
+    <div class="form-actions form-group-full">
+      <button type="submit" class="btn-submit">Enregistrer</button>
+      <a href="javascript:history.back()" class="btn-cancel">Annuler</a>
+    </div>
+
+  </form>
+</div>
+{{> partials/footer}}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form_action = (document.getElementById("formgeneric").action.split('8080/')[1]).split('_')[0];
+        console.log("type action : ", form_action);
+        {{!-- 
+            // Utilisation du paramètre config_actions.json "form_action" pour détecter le type de formulaire (insertion ou modification) 
+            et dans le cas de l'insertion on efface les données du formulaire via la boucle ci-dessousz
+        --}}
+        if (form_action === "insert") {
+            const list_fields = document.getElementsByClassName("form-input");
+            for (const el of list_fields) {
+              el.value = "";
+            }
+        }
+        
+    });
+</script>

@@ -22,6 +22,9 @@ pub struct ActionConfig {
     pub upload_dir:   Option<String>,
     pub allowed_mime: Option<String>,
     pub max_size_mb:  Option<String>,
+    /// Nom du champ fichier dans le formulaire multipart (plugin_sql_upload)
+    #[serde(default)]
+    pub upload_field: String,
      // Ressources pour listes déroulantes
     // data_resources : { "nom_colonne": "nom_ressource" }
     #[serde(default)]
@@ -137,6 +140,7 @@ impl Dispatcher {
             filter:       action.filter.clone().unwrap_or_else(|| "{}".to_string()),
             operation:    action.operation.clone().unwrap_or_else(|| "find".to_string()),
             upload_dir,
+            upload_field: action.upload_field.clone(),
             allowed_mime: action.allowed_mime.clone()
                 .unwrap_or_else(|| "image/jpeg,image/png,application/pdf".to_string()),
             max_size_mb:  action.max_size_mb.clone().unwrap_or_else(|| "10".to_string()),

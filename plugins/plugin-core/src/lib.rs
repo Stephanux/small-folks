@@ -61,6 +61,8 @@ pub struct ActionContext {
     pub sql_resources:  HashMap<String, String>,  // "countries" → "SELECT code, name_fr..."
     // Formulaire générique
     pub form_action:    Option<String>,           // ← nouveau gère l'action d'un formulaire (ex.: "/countrie")
+    /// Champ fichier du formulaire multipart (utilisé par plugin_sql_upload)
+    pub upload_field:   String,
     /// Nombre de colonnes : 1 (défaut) ou 2
     pub form_columns:          u8,
     /// Champs affichés sur toute la largeur en mode 2 colonnes
