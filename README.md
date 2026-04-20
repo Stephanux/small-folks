@@ -23,6 +23,7 @@ Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées
 | jsonwebtoken | 9 | JWT HS256 pour l'authentification |
 | multer | 3 | parsing multipart/form-data |
 | uuid | 1 | génération d'identifiants uniques |
+| sysinfo | 0.30 | métriques RAM, disque, uptime (plugin_health) |
 
 ---
 
@@ -33,21 +34,24 @@ small-folks/
 ├── README.md                        ← ce fichier
 ├── config_actions.json              ← annuaire des routes
 ├── .env                             ← variables d'environnement
-├── Cargo.toml                       ← workspace Rust
+├── Cargo.toml                       ← workspace Rust (edition 2024 pour le binaire)
 ├── src/
 │   ├── main.rs                      ← démarrage, pools, précache plugins
 │   └── dispatcher.rs                ← résolution routes, rendu, auth
-├── plugins/
+├── plugins/                         ← tous les plugins en edition 2021
 │   ├── plugin-core/src/lib.rs       ← traits et types partagés (FFI)
-│   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources
+│   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources + form
 │   ├── plugin_mongo/src/lib.rs      ← MongoDB avec MongoContext autonome
 │   ├── plugin_auth/src/lib.rs       ← login / logout / JWT / sessions
-│   └── plugin_upload/src/lib.rs     ← upload multipart → disque + MySQL
+│   ├── plugin_upload/src/lib.rs     ← upload multipart → disque + MySQL
+│   ├── plugin_sql_upload/src/lib.rs ← formulaire texte + fichier → SQL + disque
+│   └── plugin_health/src/lib.rs     ← métriques serveur + ping BDD
 ├── templates/
 │   ├── generics/                    ← templates réutilisables
 │   │   ├── tableGeneric.hbs         ← tableau de données générique
 │   │   ├── formGeneric.hbs          ← formulaire générique (inputs + selects)
 │   │   ├── listeGeneric.hbs         ← liste <select> générique
+│   │   ├── health_dashboard.hbs     ← dashboard santé serveur
 │   │   ├── login.hbs                ← page de connexion
 │   │   ├── upload_form.hbs          ← formulaire d'upload
 │   │   ├── upload_list.hbs          ← liste des fichiers uploadés
@@ -61,7 +65,7 @@ small-folks/
 │   └── specifics/                   ← templates spécifiques au projet
 │       └── form_countries.hbs
 ├── public/
-│   ├── css/styles.css               ← styles globaux + formulaires
+│   ├── css/styles.css               ← styles globaux + formulaires + dashboard
 │   └── images/                      ← favicon, logos
 ├── uploads/                         ← fichiers uploadés (UUID.ext)
 ├── resources/                       ← logos et schémas du framework
@@ -120,6 +124,7 @@ HTTP response
 | `form_fullwidth_fields` | array | `[]` | Champs sur toute la largeur en mode 2 colonnes |
 | `data_resources` | objet | `{}` | `"nom_colonne" → "nom_ressource"` pour les selects |
 | `sql_resources` | objet | `{}` | `"nom_ressource" → "SELECT ..."` |
+| `upload_field` | string | — | Nom du champ fichier dans le formulaire (plugin_sql_upload) |
 | `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Types MIME upload |
 | `max_size_mb` | string | `10` | Taille max upload en Mo |
 | `view` | string | — | Nom du template Handlebars |
@@ -135,6 +140,7 @@ HTTP response
 | Formulaire 1 colonne | `formGeneric.hbs` + `form_action` | `{ data: [{fields:[{key,value,fullwidth}]}], form_action, form_columns:1 }` |
 | Formulaire 2 colonnes | `formGeneric.hbs` + `form_columns:2` | idem + champs fullwidth marqués `true` |
 | Formulaire avec selects | idem + `data_resources` | idem + `resources: { field: [[val,lbl]] }` |
+| Formulaire + upload fichier | template spécifique + `enctype="multipart/form-data"` | traité par `plugin_sql_upload` |
 
 ### Structure JSON envoyée à formGeneric.hbs
 
@@ -168,16 +174,9 @@ HTTP response
         "view": "generics/tableGeneric.hbs",
         "return_type": "html"
     },
-    "GET/regions": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT COALESCE(region,'Unknown') AS region, CAST(COUNT(*) AS CHAR) AS total FROM countries GROUP BY region",
-        "view": "generics/tableGeneric.hbs",
-        "return_type": "html",
-        "auth": true
-    },
     "GET/view/user/:id": {
         "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id_users AS CHAR) AS id, name, firstName, login, function, office, code_countries, addresse1, addresse2, cp, city FROM users WHERE id_users = :id",
+        "sql":         "SELECT CAST(id_users AS CHAR) AS id, name, firstName, code_countries FROM users WHERE id_users = :id",
         "view":        "generics/formGeneric.hbs",
         "form_action": "/users",
         "form_columns": 2,
@@ -187,24 +186,21 @@ HTTP response
         "data_resources": { "code_countries": "countries" },
         "sql_resources":  { "countries": "SELECT code, name_fr FROM countries ORDER BY name_fr" }
     },
+    "POST/insert_user": {
+        "plugin":       "./target/release/libplugin_sql_upload.so",
+        "sql":          "INSERT INTO users (name, firstName, login, image) VALUES (:name, :firstName, :login, :image)",
+        "upload_field": "image",
+        "allowed_mime": "image/jpeg,image/png,image/webp",
+        "max_size_mb":  "5",
+        "return_type":  "redirect",
+        "redirect_to":  "/users",
+        "auth":         true
+    },
     "POST/login": {
         "plugin": "./target/release/libplugin_auth.so",
         "operation": "login",
         "return_type": "redirect",
         "redirect_to": "/index"
-    },
-    "GET/logout": {
-        "plugin": "./target/release/libplugin_auth.so",
-        "operation": "logout",
-        "return_type": "redirect",
-        "redirect_to": "/login"
-    },
-    "POST/upload": {
-        "plugin": "./target/release/libplugin_upload.so",
-        "allowed_mime": "image/jpeg,image/png,application/pdf",
-        "max_size_mb": "10",
-        "return_type": "redirect",
-        "redirect_to": "/uploads"
     },
     "GET/health": {
         "plugin": "./target/release/libplugin_health.so",
@@ -217,14 +213,6 @@ HTTP response
         "view": "generics/health_dashboard.hbs",
         "return_type": "html",
         "auth": true
-    },
-    "GET/mongo/countries": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{}",
-        "operation": "find",
-        "view": "generics/tableGeneric.hbs",
-        "return_type": "html"
     }
 }
 ```
@@ -247,11 +235,12 @@ pub struct ActionContext {
     pub filter:                String,
     pub operation:             String,
     pub upload_dir:            String,
+    pub upload_field:          String,        // champ fichier (plugin_sql_upload)
     pub allowed_mime:          String,
     pub max_size_mb:           String,
     pub form_action:           Option<String>,
-    pub form_columns:          u8,               // 1 (défaut) ou 2
-    pub form_fullwidth_fields: Vec<String>,       // champs pleine largeur en mode 2 col
+    pub form_columns:          u8,            // 1 (défaut) ou 2
+    pub form_fullwidth_fields: Vec<String>,   // champs pleine largeur en mode 2 col
     pub data_resources:        HashMap<String, String>,
     pub sql_resources:         HashMap<String, String>,
     pub params:                HashMap<String, String>,
@@ -281,6 +270,13 @@ pub trait Plugin: Send + Sync {
 
 ## Règles critiques FFI cdylib
 
+### Edition Rust
+```
+Cargo.toml principal (binaire small-folks) → edition = "2024"
+Cargo.toml des plugins (cdylib)            → edition = "2021"
+```
+En edition 2024, `#[no_mangle]` devient `#[unsafe(no_mangle)]`. Les plugins restent en 2021 pour éviter cette contrainte.
+
 ### plugin_sql — block_in_place + handle.block_on
 ```rust
 tokio::task::block_in_place(|| {
@@ -298,11 +294,12 @@ Sinon `block_in_place` de `plugin_sql` affame le heartbeat MongoDB → latence 1
 struct MongoContext { rt: Runtime, client: mongodb::Client }
 static MONGO_CTX: OnceLock<MongoContext> = OnceLock::new();
 
-// Dans execute() :
 tokio::task::block_in_place(|| {
     get_mongo_ctx().rt.block_on(async move { ... })
 })
 ```
+
+**La même règle s'applique à `plugin_health`** (`HealthContext` + `HEALTH_RT`) et à **`plugin_sql_upload`** (`OnceLock<Runtime>` dédié).
 
 ### Règles SQL
 - Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(COUNT(*) AS CHAR)`, `CAST(id AS CHAR)`, `CAST(created_at AS CHAR)`
@@ -318,17 +315,18 @@ res.append_header("Set-Cookie", "jwt_token=...");
 
 ### Templates Handlebars Rust
 - `{{this}}` et non `{{.}}`
-- `{{#each this.0}}` + `{{@key}}` pour les en-têtes génériques
-- `{{#if (lookup @root.resources @key)}}` pour afficher un `<select>` conditionnel
+- `{{#each this}}` + `{{@key}}` pour `tableGeneric.hbs`
+- `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{#if fullwidth}}` pour `formGeneric.hbs`
+- `{{#if (lookup @root.resources key)}}` pour afficher un `<select>` conditionnel
+- `../../../@key` est interdit — Handlebars Rust ne supporte pas la remontée profonde
 - Partials : `{{> partials/header page_title="Titre"}}`
+- **Formulaire avec upload** : `enctype="multipart/form-data"` obligatoire sur la balise `<form>` (guillemet fermant !)
 
 ---
 
 ## Formulaire générique — mode 2 colonnes
 
 Le formulaire générique supporte 1 ou 2 colonnes via CSS Grid, configurable par route.
-
-### Fonctionnement
 
 `plugin_sql` enrichit chaque champ avec un flag `fullwidth: bool` calculé depuis `form_fullwidth_fields` :
 
@@ -342,15 +340,86 @@ form_fullwidth_fields:         {key:"name",    fw:false}     {{#if fullwidth}} �
                              ]
 ```
 
-### CSS Grid appliqué
-
 ```css
 .form-2col { grid-template-columns: 1fr 1fr; }
 .form-2col .form-group-full { grid-column: 1 / -1; }
+@media (max-width: 640px) { .form-2col { grid-template-columns: 1fr; } }
+```
 
-@media (max-width: 640px) {
-  .form-2col { grid-template-columns: 1fr; }
+---
+
+## Upload de fichiers (plugin_upload)
+
+Upload autonome sans SQL métier — stocke le fichier + métadonnées dans la table `uploads`.
+
+```
+POST /upload (multipart/form-data)
+  → validation MIME + taille
+  → UUID.ext sur disque
+  → INSERT INTO uploads
+  → redirect
+```
+
+---
+
+## Upload + SQL métier (plugin_sql_upload)
+
+Fusion de l'upload et d'une requête SQL en une seule action — idéal pour les formulaires mixtes (champs texte + fichier image).
+
+### Flux
+
+```
+POST /insert_user (multipart/form-data)
+  ├─ 1. Parse multipart → champs texte dans params
+  ├─ 2. Validation MIME + taille du fichier
+  ├─ 3. Renommage UUID.ext → écriture sur disque
+  ├─ 4. INSERT INTO uploads (métadonnées)
+  ├─ 5. params[upload_field] = "uuid.ext"
+  ├─ 6. Exécution du SQL métier avec tous les params
+  └─ redirect ou json
+```
+
+Si aucun fichier n'est fourni → `params[upload_field] = ""` → SQL reçoit `NULL` (colonne doit accepter NULL).
+
+En cas d'erreur SQL → le fichier uploadé est supprimé du disque (rollback partiel).
+
+### Exemple config_actions.json
+
+```json
+"POST/insert_user": {
+    "plugin":       "./target/release/libplugin_sql_upload.so",
+    "sql":          "INSERT INTO users (name, firstName, login, image) VALUES (:name, :firstName, :login, :image)",
+    "upload_field": "image",
+    "allowed_mime": "image/jpeg,image/png,image/webp",
+    "max_size_mb":  "5",
+    "return_type":  "redirect",
+    "redirect_to":  "/users",
+    "auth":         true
 }
+```
+
+### Astuce UPDATE avec photo optionnelle
+
+Si l'utilisateur ne change pas la photo lors d'une édition, utiliser `COALESCE` pour conserver l'ancienne valeur :
+
+```json
+"sql": "UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:id"
+```
+
+`NULLIF(:image,'')` convertit la chaîne vide en `NULL`, `COALESCE` conserve alors l'ancienne valeur de la colonne.
+
+### Template HTML requis
+
+Le formulaire doit obligatoirement déclarer `enctype="multipart/form-data"` (attention au guillemet fermant) :
+
+```html
+<form method="POST" action="{{form_action}}" enctype="multipart/form-data">
+  <!-- champs texte normaux -->
+  <input type="text" name="name">
+  <!-- champ fichier -->
+  <input type="file" name="image" accept=".jpg,.jpeg,.png,.webp">
+  <button type="submit">Enregistrer</button>
+</form>
 ```
 
 ---
@@ -385,35 +454,6 @@ POST /login (login=x&mdp=y)
 
 ---
 
-## Upload de fichiers
-
-### Flux
-```
-POST /upload (multipart/form-data)
-  → plugin_upload.execute()
-  → validation MIME (allowed_mime)
-  → renommage UUID.ext
-  → écriture sur disque (UPLOAD_DIR)
-  → INSERT INTO uploads (...)
-  → redirect /uploads
-```
-
-### Table MySQL uploads
-```sql
-CREATE TABLE IF NOT EXISTS uploads (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    uuid        CHAR(36)     NOT NULL UNIQUE,
-    filename    VARCHAR(255) NOT NULL,
-    stored_as   VARCHAR(255) NOT NULL,
-    mime_type   VARCHAR(100) NOT NULL,
-    size_bytes  BIGINT       NOT NULL,
-    upload_dir  VARCHAR(255) NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-```
-
----
-
 ## Health check (plugin_health)
 
 ### Routes
@@ -438,9 +478,26 @@ GET /health/dashboard    → HTML dashboard (auth: true conseillé)
 ```
 
 `status` passe en `"warning"` si MySQL ou MongoDB KO, ou si RAM/disque > 90%.
-MongoDB désactivé (`"status": "disabled"`) n'est pas considéré comme une erreur.
+`plugin_health` utilise `HealthContext` avec son propre `HEALTH_RT` — même pattern que `plugin_mongo`.
 
-**Note** : `plugin_health` utilise `HealthContext` avec son propre runtime Tokio (`HEALTH_RT`) pour le ping MongoDB — même pattern que `plugin_mongo` pour éviter la contention sur le runtime principal.
+---
+
+## Table MySQL uploads
+
+Utilisée par `plugin_upload` et `plugin_sql_upload`.
+
+```sql
+CREATE TABLE IF NOT EXISTS uploads (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    uuid        CHAR(36)     NOT NULL UNIQUE,
+    filename    VARCHAR(255) NOT NULL,
+    stored_as   VARCHAR(255) NOT NULL,
+    mime_type   VARCHAR(100) NOT NULL,
+    size_bytes  BIGINT       NOT NULL,
+    upload_dir  VARCHAR(255) NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
 
 ---
 
@@ -485,6 +542,8 @@ Mélanger binaire release et `.so` debug provoque un coredump.
 | plugin_mongo | find 243 documents | 3-5ms |
 | plugin_auth | login complet | ~1ms |
 | plugin_upload | upload 1 fichier | < 10ms |
+| plugin_sql_upload | upload + INSERT SQL | < 15ms |
+| plugin_health | toutes métriques + pings | < 10ms |
 
 ---
 
