@@ -97,7 +97,7 @@ fn collect_metrics(state: &AppState) -> Value {
     // ── Disque ────────────────────────────────────────────────────────────────
     let disks     = Disks::new_with_refreshed_list();
     let disk_info = find_main_disk(&disks);
-
+    println!("disks : {:?}", disks);
     // ── Uptime ────────────────────────────────────────────────────────────────
     let uptime_secs = System::uptime();
 
