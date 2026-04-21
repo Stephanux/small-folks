@@ -1,25 +1,27 @@
 {{> partials/header page_title="Résultats"}}
 {{> partials/nav}}
 <body>
-<div class="inputbox">
-  <table id="data" class="display" style="width:100%">
-  <thead>
-    <tr> 
-         {{#each this.0}} {{!-- on utilise le premier élément pour parcourir les champs de l'objet json --}}
-            <th>{{@key}}</th>
-         {{/each}}
-    </tr>
-  </thead>
-  <tbody>
-  {{#each this}}
-    <tr>
-      {{#each this}}
-        <td>{{this}}</td>  <!-- permet de récupérer la valeur du champ de l'objet JSON -->
-      {{/each}}
-    </tr>
-  {{/each}}
-  </tbody>  
-  </table>
+<div class="card">
+  <div class="inputbox">
+    <table id="data" class="display" style="width:100%">
+    <thead>
+      <tr> 
+          {{#each this.0}} {{!-- on utilise le premier élément pour parcourir les champs de l'objet json --}}
+              <th>{{@key}}</th>
+          {{/each}}
+      </tr>
+    </thead>
+    <tbody>
+    {{#each this}}
+      <tr>
+        {{#each this}}
+          <td>{{this}}</td>  <!-- permet de récupérer la valeur du champ de l'objet JSON -->
+        {{/each}}
+      </tr>
+    {{/each}}
+    </tbody>  
+    </table>
+  </div>
 </div>
 {{> partials/footer}}
 

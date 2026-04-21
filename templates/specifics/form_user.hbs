@@ -1,52 +1,53 @@
 {{> partials/header page_title="Formulaire"}}
 {{> partials/nav}}
+<div class="card">
+  <div class="container">
+    <form id="formgeneric" class="generic-form {{#if (eq form_columns 2)}}form-2col{{/if}}"
+          method="POST" action="{{form_action}}" enctype="multipart/form-data">
+      {{!--
+        En mode 2 colonnes, certains champs peuvent être forcés pleine largeur
+        via la liste form_fullwidth_fields.
+        On utilise un helper Handlebars natif : (lookup @root.form_fullwidth_fields @key)
+        ne fonctionne pas pour un tableau — on utilise donc une classe CSS et
+        on laisse le CSS gérer via :nth-child si besoin, OU on entoure chaque champ
+        d'un div dont la classe est conditionnelle.
+        Solution retenue : data-fullwidth="true/false" + CSS selector
+      --}}
+      {{#each data.0.fields}}
+      <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
 
-<div class="container">
-  <form id="formgeneric" class="generic-form {{#if (eq form_columns 2)}}form-2col{{/if}}"
-        method="POST" action="{{form_action}}" enctype="multipart/form-data">
-    {{!--
-      En mode 2 colonnes, certains champs peuvent être forcés pleine largeur
-      via la liste form_fullwidth_fields.
-      On utilise un helper Handlebars natif : (lookup @root.form_fullwidth_fields @key)
-      ne fonctionne pas pour un tableau — on utilise donc une classe CSS et
-      on laisse le CSS gérer via :nth-child si besoin, OU on entoure chaque champ
-      d'un div dont la classe est conditionnelle.
-      Solution retenue : data-fullwidth="true/false" + CSS selector
-    --}}
-    {{#each data.0.fields}}
-    <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
+        <label class="form-label" for="{{key}}">{{key}}</label>
 
-      <label class="form-label" for="{{key}}">{{key}}</label>
-
-      {{#if (lookup @root.resources key)}}
-        <select class="form-input form-select" id="{{key}}" name="{{key}}">
-          <option value="">-- choisir --</option>
-          {{#each (lookup @root.resources key)}}
-            <option value="{{this.[0]}}">{{this.[1]}}</option>
-          {{/each}}
-        </select>
-      {{else}}
-        {{#if (eq key "image")}}
-            <label for="file" style="display:block; margin-bottom:.4rem; font-weight:500;">
-                Fichier (jpg, png, pdf — max 5 Mo)
-            </label>
-            <input type="file" id="image" name="image"
-                accept=".jpg,.jpeg,.png,.pdf"
-                style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
+        {{#if (lookup @root.resources key)}}
+          <select class="form-input form-select" id="{{key}}" name="{{key}}">
+            <option value="">-- choisir --</option>
+            {{#each (lookup @root.resources key)}}
+              <option value="{{this.[0]}}">{{this.[1]}}</option>
+            {{/each}}
+          </select>
         {{else}}
-            <input class="form-input" type="text" id="{{key}}" name="{{key}}" value="{{value}}">
+          {{#if (eq key "image")}}
+              <label for="file" style="display:block; margin-bottom:.4rem; font-weight:500;">
+                  Fichier (jpg, png, pdf — max 5 Mo)
+              </label>
+              <input type="file" id="image" name="image"
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
+          {{else}}
+              <input class="form-input" type="text" id="{{key}}" name="{{key}}" value="{{value}}">
+          {{/if}}
         {{/if}}
-      {{/if}}
-      
-    </div>
-    {{/each}}
+        
+      </div>
+      {{/each}}
 
-    <div class="form-actions form-group-full">
-      <button type="submit" class="btn-submit">Enregistrer</button>
-      <a href="javascript:history.back()" class="btn-cancel">Annuler</a>
-    </div>
+      <div class="form-actions form-group-full">
+        <button type="submit" class="btn-submit">Enregistrer</button>
+        <a href="javascript:history.back()" class="btn-cancel">Annuler</a>
+      </div>
 
-  </form>
+    </form>
+  </div>
 </div>
 {{> partials/footer}}
 <script>
