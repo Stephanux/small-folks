@@ -35,6 +35,8 @@ small-folks/
 ├── config_actions.json              ← annuaire des routes
 ├── .env                             ← variables d'environnement
 ├── Cargo.toml                       ← workspace Rust (edition 2024 pour le binaire)
+├── dump/
+    └── R504TP_2026_04_23_dump       ← Fichier SQL pour générer la base de données de démonstration   
 ├── src/
 │   ├── main.rs                      ← démarrage, pools, précache plugins
 │   └── dispatcher.rs                ← résolution routes, rendu, auth
@@ -498,6 +500,8 @@ CREATE TABLE IF NOT EXISTS uploads (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
+
+dump de la base de données de démonstration dans le dossier ./dump
 
 ---
 
