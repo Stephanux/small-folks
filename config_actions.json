@@ -18,8 +18,9 @@
         "return_type": "html"
     },
     "POST/login": {
-        "plugin":      "./target/release/libplugin_auth.so",
-        "operation":   "login",
+        "plugin":    "./target/release/libplugin_auth.so",
+        "operation": "login",
+        "sql":       "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
         "return_type": "redirect",
         "redirect_to": "/index"
     },
