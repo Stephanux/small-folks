@@ -73,8 +73,10 @@
     },
     "GET/users": {
         "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone FROM users",
+        "sql": "SELECT CAST(id_users AS CHAR) AS id_users, name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone FROM users",
         "view": "generics/tableGeneric.hbs",
+        "row_link":    "/view/user",
+        "row_link_col": 0,
         "return_type": "html"
     },
     "GET/view/user": {
@@ -116,7 +118,7 @@
         "plugin": "",
         "sql": "",
         "view": "generics/index.hbs",
-        "return_type": "html"
+        "return_type": "html"   
     },
     "GET/communes": {
         "plugin": "./target/release/libplugin_sql.so",

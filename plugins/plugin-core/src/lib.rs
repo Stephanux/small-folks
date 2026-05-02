@@ -67,6 +67,9 @@ pub struct ActionContext {
     pub form_columns:          u8,
     /// Champs affichés sur toute la largeur en mode 2 colonnes
     pub form_fullwidth_fields: Vec<String>,
+    /// Champ fichier du formulaire pour lien href sur tableau Databale
+    pub row_link:              Option<String>,
+    pub row_link_col:          u8,
 }
 /// Résultat retourné par un plugin au dispatcher.
 pub enum PluginResult {

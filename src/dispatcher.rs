@@ -7,6 +7,7 @@ use tide::{Request, Response};
 
 /// Structure d'une action dans config_actions.json
 fn default_form_columns() -> u8 { 1 }
+fn default_row_link_col() -> u8 { 1 }
 
 /// Structure d'une action dans config_actions.json
 #[derive(Debug, Deserialize, Clone)]
@@ -47,6 +48,11 @@ pub struct ActionConfig {
     // Champs qui occupent toute la largeur même en mode 2 colonnes
     #[serde(default)]
     pub form_fullwidth_fields: Vec<String>,
+     /// URL de base pour le lien sur une colonne de tableGeneric (ex: "/view/animal")
+    pub row_link:     Option<String>,
+    /// Index de la colonne qui porte le lien (défaut : 1)
+    #[serde(default = "default_row_link_col")]
+    pub row_link_col: u8,
 }
 
 pub struct Dispatcher {
@@ -141,6 +147,8 @@ impl Dispatcher {
             operation:    action.operation.clone().unwrap_or_else(|| "find".to_string()),
             upload_dir,
             upload_field: action.upload_field.clone(),
+            row_link:      action.row_link.clone(),
+            row_link_col:  action.row_link_col,
             allowed_mime: action.allowed_mime.clone()
                 .unwrap_or_else(|| "image/jpeg,image/png,application/pdf".to_string()),
             max_size_mb:  action.max_size_mb.clone().unwrap_or_else(|| "10".to_string()),
@@ -282,10 +290,30 @@ impl Dispatcher {
                 "html" => {
                     let view_name = ctx.view.trim_end_matches(".hbs");
                     // DEBUG temporaire — à supprimer après diagnostic
-                   /* println!("[dispatcher] data envoyée au template '{}' :\n{}", 
+                    println!("[dispatcher] data envoyée au template '{}' :\n{}", 
                         view_name, 
                         serde_json::to_string_pretty(&data).unwrap_or_default()
-                    );*/
+                    );
+                    // Toujours wrapper les données dans { data, row_link, row_link_col }
+                    // pour que {{#if row_link}} fonctionne dans tableGeneric
+                    // même quand row_link est absent (chaîne vide = falsy en Handlebars)
+                    let data = match &data {
+                        // Déjà enrichi par plugin_sql (form) → ne pas re-wrapper
+                        serde_json::Value::Object(m) if m.contains_key("data") => data,
+                        // Array brut ou objet simple → wrapper systématique
+                        _ => {
+                            let mut w = serde_json::Map::new();
+                            w.insert("data".into(), data);
+                            w.insert("row_link".into(),
+                                serde_json::Value::String(
+                                    ctx.row_link.clone().unwrap_or_default()
+                                ));
+                            w.insert("row_link_col".into(),
+                                serde_json::Value::Number(ctx.row_link_col.into()));
+                            serde_json::Value::Object(w)
+                        }
+                    };
+
                     // Injecter form_action + form_columns + form_fullwidth_fields
                     // si défini et que les données ne sont pas déjà enrichies par plugin_sql
                     let data = if let Some(fa) = &ctx.form_action {
@@ -330,6 +358,7 @@ impl Dispatcher {
                         Err(e) => self.render_error(500,
                             &format!("Erreur template '{}' : {}", view_name, e)),
                     }
+                    
                 }
                 "redirect" => {
                     let target = ctx.redirect_to.as_deref().unwrap_or("/");

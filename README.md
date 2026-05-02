@@ -199,8 +199,9 @@ HTTP response
         "auth":         true
     },
     "POST/login": {
-        "plugin": "./target/release/libplugin_auth.so",
+        "plugin":    "./target/release/libplugin_auth.so",
         "operation": "login",
+        "sql":       "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
         "return_type": "redirect",
         "redirect_to": "/index"
     },
@@ -432,12 +433,13 @@ Le formulaire doit obligatoirement déclarer `enctype="multipart/form-data"` (at
 ```
 POST /login (login=x&mdp=y)
   → plugin_auth.do_login()
-  → SELECT users WHERE login=? AND mdp=?
+  → sql dans config_actions.json : SELECT users WHERE login=? AND mdp=?
   → OK : UUID session → cache mémoire + JWT HS256
   → dispatcher : cookie session_id (HttpOnly) + jwt_token
   → redirect vers next= ou LOGIN_REDIRECT
   → KO : redirect /login?error=1
 ```
+
 
 ### Opérations plugin_auth
 

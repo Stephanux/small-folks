@@ -1,27 +1,82 @@
 {{> partials/header page_title="Résultats"}}
 {{> partials/nav}}
-<body>
-<div class="card">
-  <div class="inputbox">
-    <table id="data" class="display" style="width:100%">
-    <thead>
-      <tr> 
-          {{#each this.0}} {{!-- on utilise le premier élément pour parcourir les champs de l'objet json --}}
-              <th>{{@key}}</th>
-          {{/each}}
-      </tr>
-    </thead>
-    <tbody>
-    {{#each this}}
-      <tr>
-        {{#each this}}
-          <td>{{this}}</td>  <!-- permet de récupérer la valeur du champ de l'objet JSON -->
+
+<div class="container">
+  <div class="card">
+
+    {{!--
+      Les données arrivent TOUJOURS sous la forme :
+      { data: [...], row_link: "" ou "/chemin", row_link_col: 1 }
+      row_link vide = falsy → pas de lien
+      row_link non vide  → lien sur la colonne row_link_col
+    --}}
+
+    {{#if data}}
+    <table id="data" class="datatable display" style="width:100%">
+      <thead>
+        <tr>
+          {{#each data}}{{#if @first}}
+            {{#each this}}<th>{{@key}}</th>{{/each}}
+          {{/if}}{{/each}}
+        </tr>
+      </thead>
+      <tbody>
+        {{#each data}}
+        <tr>
+          {{#each this}}<td>{{this}}</td>{{/each}}
+        </tr>
         {{/each}}
-      </tr>
-    {{/each}}
-    </tbody>  
+      </tbody>
     </table>
+    {{else}}
+    <p style="color:#888; font-style:italic;">Aucune donnée.</p>
+    {{/if}}
+
   </div>
 </div>
-{{> partials/footer}}
 
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tables = document.querySelectorAll('table');
+  tables.forEach(function(t) {
+
+    {{#if row_link}}
+    {{!-- Avec lien sur la colonne row_link_col --}}
+    new DataTable(t, {
+      pageLength: 25,
+      language: {
+        search:     "Rechercher :",
+        lengthMenu: "Afficher _MENU_ lignes",
+        info:       "Lignes _START_ à _END_ sur _TOTAL_",
+        paginate:   { previous: "Préc.", next: "Suiv." }
+      },
+      columnDefs: [
+        {
+          targets: {{row_link_col}},
+          render: function(data, type, row, meta) {
+            if (type === 'display') {
+              return '<a href="{{row_link}}/' + data + '">' + data + '</a>';
+            }
+            return data;
+          }
+        }
+      ]
+    });
+    {{else}}
+    {{!-- Sans lien --}}
+    new DataTable(t, {
+      pageLength: 25,
+      language: {
+        search:     "Rechercher :",
+        lengthMenu: "Afficher _MENU_ lignes",
+        info:       "Lignes _START_ à _END_ sur _TOTAL_",
+        paginate:   { previous: "Préc.", next: "Suiv." }
+      }
+    });
+    {{/if}}
+
+  });
+});
+</script>
+
+{{> partials/footer}}
