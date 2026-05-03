@@ -36,10 +36,11 @@ small-folks/
 ├── .env                             ← variables d'environnement
 ├── Cargo.toml                       ← workspace Rust (edition 2024 pour le binaire)
 ├── dump/
-    └── R504TP_2026_04_23_dump       ← Fichier SQL pour générer la base de données de démonstration   
+│   └── R504TP_2026_04_23_dump       ← dump SQL de la base de démonstration
 ├── src/
 │   ├── main.rs                      ← démarrage, pools, précache plugins
-│   └── dispatcher.rs                ← résolution routes, rendu, auth
+│   ├── dispatcher.rs                ← résolution routes, rendu, auth
+│   └── helpers_hbs.rs               ← helpers Handlebars personnalisés
 ├── plugins/                         ← tous les plugins en edition 2021
 │   ├── plugin-core/src/lib.rs       ← traits et types partagés (FFI)
 │   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources + form
@@ -50,8 +51,8 @@ small-folks/
 │   └── plugin_health/src/lib.rs     ← métriques serveur + ping BDD
 ├── templates/
 │   ├── generics/                    ← templates réutilisables
-│   │   ├── tableGeneric.hbs         ← tableau de données générique
-│   │   ├── formGeneric.hbs          ← formulaire générique (inputs + selects)
+│   │   ├── tableGeneric.hbs         ← tableau de données + lien optionnel (row_link)
+│   │   ├── formGeneric.hbs          ← formulaire générique (inputs + selects + selected)
 │   │   ├── listeGeneric.hbs         ← liste <select> générique
 │   │   ├── health_dashboard.hbs     ← dashboard santé serveur
 │   │   ├── login.hbs                ← page de connexion
@@ -98,10 +99,11 @@ plugin_sql.execute(ctx, state)        ← synchrone (contrainte FFI cdylib)
   ├─ block_in_place + handle.block_on
   ├─ requête principale (ctx.sql)
   ├─ requêtes ressources (ctx.sql_resources) si data_resources défini
+  │     → enrichissement avec { val, label, selected } par option
   └─ PluginResult::Data(json)
   ↓
 Dispatcher : rendu selon return_type
-  ├─ "html"     → hbs.render(view, data)
+  ├─ "html"     → injection row_link + form_action → hbs.render(view, data)
   ├─ "json"     → HTTP 200 application/json
   └─ "redirect" → HTTP 303 Location
   ↓
@@ -117,7 +119,7 @@ HTTP response
 | Champ | Type | Défaut | Description |
 |---|---|---|---|
 | `plugin` | string | — | Chemin vers le `.so` |
-| `sql` | string | — | Requête SQL avec `:param` |
+| `sql` | string | — | Requête SQL avec `:param` (utilisé aussi par plugin_auth) |
 | `collection` | string | — | Collection MongoDB |
 | `filter` | string | `{}` | Filtre BSON JSON avec `:param` |
 | `operation` | string | `find` | Opération MongoDB ou auth (`login`, `logout`, `me`, `status`, `dashboard`) |
@@ -126,6 +128,8 @@ HTTP response
 | `form_fullwidth_fields` | array | `[]` | Champs sur toute la largeur en mode 2 colonnes |
 | `data_resources` | objet | `{}` | `"nom_colonne" → "nom_ressource"` pour les selects |
 | `sql_resources` | objet | `{}` | `"nom_ressource" → "SELECT ..."` |
+| `row_link` | string | — | URL de base pour le lien sur une colonne de `tableGeneric` (ex: `/view/animal`) |
+| `row_link_col` | number | `1` | Index de la colonne qui porte le lien (défaut : colonne 1) |
 | `upload_field` | string | — | Nom du champ fichier dans le formulaire (plugin_sql_upload) |
 | `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Types MIME upload |
 | `max_size_mb` | string | `10` | Taille max upload en Mo |
@@ -138,53 +142,82 @@ HTTP response
 
 | Cas | Template | Structure JSON reçue |
 |---|---|---|
-| Liste de données | `tableGeneric.hbs` | `[{...}]` → `{{#each this}}` |
+| Liste simple | `tableGeneric.hbs` | `{ data: [{...}], row_link: "", row_link_col: 1 }` |
+| Liste avec lien | `tableGeneric.hbs` + `row_link` | `{ data: [{...}], row_link: "/view/x", row_link_col: 1 }` |
 | Formulaire 1 colonne | `formGeneric.hbs` + `form_action` | `{ data: [{fields:[{key,value,fullwidth}]}], form_action, form_columns:1 }` |
 | Formulaire 2 colonnes | `formGeneric.hbs` + `form_columns:2` | idem + champs fullwidth marqués `true` |
-| Formulaire avec selects | idem + `data_resources` | idem + `resources: { field: [[val,lbl]] }` |
+| Formulaire avec selects | idem + `data_resources` | idem + `resources: { field: [{val,label,selected}] }` |
 | Formulaire + upload fichier | template spécifique + `enctype="multipart/form-data"` | traité par `plugin_sql_upload` |
+
+### Structure JSON envoyée à tableGeneric.hbs
+
+Les données sont **toujours** wrappées dans un objet par le dispatcher — `row_link` vide = falsy en Handlebars :
+
+```json
+{
+  "data": [
+    { "id": "1", "nom": "Lion", "espece": "Panthera leo" },
+    { "id": "2", "nom": "Tigre", "espece": "Panthera tigris" }
+  ],
+  "row_link":     "/view/animal",
+  "row_link_col": 1
+}
+```
+
+Sans `row_link` dans la config → `row_link: ""` → `{{#if row_link}}` est falsy → tableau sans lien.
 
 ### Structure JSON envoyée à formGeneric.hbs
 
 ```json
 {
-  "form_action":  "/users",
+  "form_action":  "/update_user",
   "form_columns": 2,
   "data": [
     {
       "fields": [
-        { "key": "name",      "value": "Mascaron", "fullwidth": false },
-        { "key": "firstName", "value": "Stéphane", "fullwidth": false },
-        { "key": "addresse1", "value": "Rue ...",  "fullwidth": true  },
-        { "key": "city",      "value": "Mont...",  "fullwidth": true  }
+        { "key": "name",           "value": "Mascaron", "fullwidth": false },
+        { "key": "code_countries", "value": "FR",       "fullwidth": false },
+        { "key": "addresse1",      "value": "Rue ...",  "fullwidth": true  }
       ]
     }
   ],
   "resources": {
-    "code_countries": [["FR", "France"], ["DE", "Allemagne"]]
+    "code_countries": [
+      { "val": "DE", "label": "Allemagne", "selected": false },
+      { "val": "FR", "label": "France",    "selected": true  },
+      { "val": "US", "label": "États-Unis","selected": false }
+    ]
   }
 }
 ```
+
+**`selected` est pré-calculé côté Rust** dans `plugin_sql` en comparant `val` avec la valeur courante du champ. Cela évite toute remontée de contexte (`../value`) impossible en Handlebars Rust.
+
+- Mode `insert_XXX` → valeurs vides → `selected: false` partout → "-- choisir --" affiché
+- Mode `update_XXX` → `selected: true` sur l'option correspondant à la valeur courante
 
 ### Exemples de routes
 
 ```json
 {
-    "GET/countries": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT code, name_us, name_fr FROM countries ORDER BY name_us",
-        "view": "generics/tableGeneric.hbs",
-        "return_type": "html"
+    "GET/animaux": {
+        "plugin":       "./target/release/libplugin_sql.so",
+        "sql":          "SELECT CAST(id AS CHAR) AS id, nom, espece FROM animaux ORDER BY nom",
+        "view":         "generics/tableGeneric.hbs",
+        "return_type":  "html",
+        "row_link":     "/view/animal",
+        "row_link_col": 1,
+        "auth":         true
     },
     "GET/view/user/:id": {
         "plugin":      "./target/release/libplugin_sql.so",
         "sql":         "SELECT CAST(id_users AS CHAR) AS id, name, firstName, code_countries FROM users WHERE id_users = :id",
         "view":        "generics/formGeneric.hbs",
-        "form_action": "/users",
+        "form_action": "/update_user/:id",
         "form_columns": 2,
         "form_fullwidth_fields": ["addresse1", "addresse2", "city"],
         "return_type": "html",
-        "auth": true,
+        "auth":        true,
         "data_resources": { "code_countries": "countries" },
         "sql_resources":  { "countries": "SELECT code, name_fr FROM countries ORDER BY name_fr" }
     },
@@ -199,23 +232,23 @@ HTTP response
         "auth":         true
     },
     "POST/login": {
-        "plugin":    "./target/release/libplugin_auth.so",
-        "operation": "login",
-        "sql":       "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
+        "plugin":      "./target/release/libplugin_auth.so",
+        "operation":   "login",
+        "sql":         "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
         "return_type": "redirect",
         "redirect_to": "/index"
     },
     "GET/health": {
-        "plugin": "./target/release/libplugin_health.so",
-        "operation": "status",
+        "plugin":      "./target/release/libplugin_health.so",
+        "operation":   "status",
         "return_type": "json"
     },
     "GET/health/dashboard": {
-        "plugin": "./target/release/libplugin_health.so",
-        "operation": "dashboard",
-        "view": "generics/health_dashboard.hbs",
+        "plugin":      "./target/release/libplugin_health.so",
+        "operation":   "dashboard",
+        "view":        "generics/health_dashboard.hbs",
         "return_type": "html",
-        "auth": true
+        "auth":        true
     }
 }
 ```
@@ -244,6 +277,8 @@ pub struct ActionContext {
     pub form_action:           Option<String>,
     pub form_columns:          u8,            // 1 (défaut) ou 2
     pub form_fullwidth_fields: Vec<String>,   // champs pleine largeur en mode 2 col
+    pub row_link:              Option<String>,// URL de base pour lien colonne tableGeneric
+    pub row_link_col:          u8,            // index colonne du lien (défaut 1)
     pub data_resources:        HashMap<String, String>,
     pub sql_resources:         HashMap<String, String>,
     pub params:                HashMap<String, String>,
@@ -266,6 +301,64 @@ pub enum PluginResult {
 pub trait Plugin: Send + Sync {
     fn name(&self) -> &'static str;
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult;
+}
+```
+
+---
+
+## Helpers Handlebars (src/helpers_hbs.rs)
+
+Les helpers Handlebars personnalisés sont regroupés dans `src/helpers_hbs.rs`, séparé de `dispatcher.rs` pour faciliter l'ajout de nouveaux helpers sans toucher au dispatcher.
+
+### Enregistrement
+
+```rust
+// Dans dispatcher.rs — Dispatcher::new()
+crate::helpers_hbs::register_all(&mut hbs);
+
+// Dans main.rs
+mod helpers_hbs;
+```
+
+### Ajouter un helper
+
+```rust
+// Dans helpers_hbs.rs
+pub fn register_all(hbs: &mut Handlebars) {
+    hbs.register_helper("compare", Box::new(CompareHelper));
+    hbs.register_helper("mon_helper", Box::new(MonHelper)); // ← ajouter ici
+}
+```
+
+### Helper `compare`
+
+Compare deux valeurs chaînes avec un opérateur configurable. Les helpers de blocs doivent implémenter `HelperDef` (pas une closure) pour exprimer correctement les lifetimes `'reg: 'rc` requis par `Renderable::render`.
+
+**Syntaxe :**
+```handlebars
+{{#compare val "actif"}}vrai{{/compare}}
+{{#compare val "actif"}}vrai{{else}}faux{{/compare}}
+{{#compare role "admin"  operator="=="}}...{{/compare}}
+{{#compare nb   "10"     operator=">"}}...{{/compare}}
+{{#compare nb   "10"     operator="<="}}...{{/compare}}
+{{#compare val  "x"      operator="!="}}...{{/compare}}
+```
+
+**Opérateurs supportés :** `==` `===` `!=` `!==` `>` `>=` `<` `<=`
+
+Pour les opérateurs ordinaux (`>` `>=` `<` `<=`) : comparaison numérique si les deux valeurs sont des nombres, lexicographique sinon.
+
+**Pourquoi une struct et pas une closure :**
+```rust
+// ❌ Closure — impossible d'exprimer 'reg: 'rc
+|h: &Helper, hbs: &Handlebars, ...| -> HelperResult { t.render(...) }
+
+// ✅ Struct avec HelperDef — lifetimes explicites
+impl HelperDef for CompareHelper {
+    fn call<'reg: 'rc, 'rc>(&self, h: &Helper<'rc>,
+        hbs: &'reg Handlebars<'reg>, ...) -> HelperResult {
+        t.render(hbs, ctx, rc, out)  // OK
+    }
 }
 ```
 
@@ -307,6 +400,7 @@ tokio::task::block_in_place(|| {
 ### Règles SQL
 - Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(COUNT(*) AS CHAR)`, `CAST(id AS CHAR)`, `CAST(created_at AS CHAR)`
 - Paramètres nommés `:param` convertis automatiquement en `?` positionnels
+- `plugin_auth` utilise aussi `ctx.sql` — la requête est définie dans `config_actions.json`
 
 ### Cookies multiples avec Tide
 ```rust
@@ -318,18 +412,19 @@ res.append_header("Set-Cookie", "jwt_token=...");
 
 ### Templates Handlebars Rust
 - `{{this}}` et non `{{.}}`
-- `{{#each this}}` + `{{@key}}` pour `tableGeneric.hbs`
-- `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{#if fullwidth}}` pour `formGeneric.hbs`
-- `{{#if (lookup @root.resources key)}}` pour afficher un `<select>` conditionnel
+- `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers de `tableGeneric`
+- `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{#if fullwidth}}` pour `formGeneric`
+- `{{#each (lookup @root.resources key)}}` + `{{val}}`, `{{label}}`, `{{#if selected}}` pour les options select
+- `{{#if row_link}}` fonctionne car `row_link` vaut `""` (falsy) quand absent
 - `../../../@key` est interdit — Handlebars Rust ne supporte pas la remontée profonde
 - Partials : `{{> partials/header page_title="Titre"}}`
-- **Formulaire avec upload** : `enctype="multipart/form-data"` obligatoire sur la balise `<form>` (guillemet fermant !)
+- **Formulaire avec upload** : `enctype="multipart/form-data"` obligatoire (guillemet fermant !)
 
 ---
 
-## Formulaire générique — mode 2 colonnes
+## Formulaire générique — mode 2 colonnes + selects
 
-Le formulaire générique supporte 1 ou 2 colonnes via CSS Grid, configurable par route.
+### Colonnes CSS Grid
 
 `plugin_sql` enrichit chaque champ avec un flag `fullwidth: bool` calculé depuis `form_fullwidth_fields` :
 
@@ -349,103 +444,98 @@ form_fullwidth_fields:         {key:"name",    fw:false}     {{#if fullwidth}} �
 @media (max-width: 640px) { .form-2col { grid-template-columns: 1fr; } }
 ```
 
+### Selects avec valeur pré-sélectionnée
+
+`plugin_sql` pré-calcule `selected: bool` sur chaque option en comparant `val` avec la valeur courante du champ. Cela évite toute remontée de contexte impossible en Handlebars Rust :
+
+```
+plugin_sql                               formGeneric.hbs
+──────────────────────────────           ────────────────────────────────────
+current_value = data[0]["code_countries"]  {{#each (lookup @root.resources key)}}
+= "FR"                                     <option value="{{val}}"
+                                             {{#if selected}}selected{{/if}}>
+resources["code_countries"] = [              {{label}}
+  {val:"DE", label:"Allemagne", sel:false}  </option>
+  {val:"FR", label:"France",    sel:true }  {{/each}}
+  {val:"US", label:"États-Unis",sel:false}
+]
+```
+
+| Mode form_action | Valeurs data | selected | Résultat |
+|---|---|---|---|
+| `insert_XXX` | `""` (vides) | `false` partout | "-- choisir --" affiché |
+| `update_XXX` | `"FR"`, `"admin"`... | `true` sur la valeur courante | option pré-sélectionnée |
+
 ---
 
-## Upload de fichiers (plugin_upload)
+## Tableau générique avec lien (tableGeneric + row_link)
 
-Upload autonome sans SQL métier — stocke le fichier + métadonnées dans la table `uploads`.
-
-```
-POST /upload (multipart/form-data)
-  → validation MIME + taille
-  → UUID.ext sur disque
-  → INSERT INTO uploads
-  → redirect
-```
-
----
-
-## Upload + SQL métier (plugin_sql_upload)
-
-Fusion de l'upload et d'une requête SQL en une seule action — idéal pour les formulaires mixtes (champs texte + fichier image).
-
-### Flux
-
-```
-POST /insert_user (multipart/form-data)
-  ├─ 1. Parse multipart → champs texte dans params
-  ├─ 2. Validation MIME + taille du fichier
-  ├─ 3. Renommage UUID.ext → écriture sur disque
-  ├─ 4. INSERT INTO uploads (métadonnées)
-  ├─ 5. params[upload_field] = "uuid.ext"
-  ├─ 6. Exécution du SQL métier avec tous les params
-  └─ redirect ou json
-```
-
-Si aucun fichier n'est fourni → `params[upload_field] = ""` → SQL reçoit `NULL` (colonne doit accepter NULL).
-
-En cas d'erreur SQL → le fichier uploadé est supprimé du disque (rollback partiel).
-
-### Exemple config_actions.json
+Quand `row_link` est défini dans `config_actions.json`, DataTables génère automatiquement un lien sur la colonne `row_link_col` :
 
 ```json
-"POST/insert_user": {
-    "plugin":       "./target/release/libplugin_sql_upload.so",
-    "sql":          "INSERT INTO users (name, firstName, login, image) VALUES (:name, :firstName, :login, :image)",
-    "upload_field": "image",
-    "allowed_mime": "image/jpeg,image/png,image/webp",
-    "max_size_mb":  "5",
-    "return_type":  "redirect",
-    "redirect_to":  "/users",
-    "auth":         true
+"GET/animaux": {
+    "plugin":       "./target/release/libplugin_sql.so",
+    "sql":          "SELECT CAST(id AS CHAR) AS id, nom, espece FROM animaux",
+    "view":         "generics/tableGeneric.hbs",
+    "return_type":  "html",
+    "row_link":     "/view/animal",
+    "row_link_col": 1
 }
 ```
 
-### Astuce UPDATE avec photo optionnelle
+Le lien est construit comme `row_link + "/" + data` → `/view/animal/Lion`.
 
-Si l'utilisateur ne change pas la photo lors d'une édition, utiliser `COALESCE` pour conserver l'ancienne valeur :
-
-```json
-"sql": "UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:id"
-```
-
-`NULLIF(:image,'')` convertit la chaîne vide en `NULL`, `COALESCE` conserve alors l'ancienne valeur de la colonne.
-
-### Template HTML requis
-
-Le formulaire doit obligatoirement déclarer `enctype="multipart/form-data"` (attention au guillemet fermant) :
-
-```html
-<form method="POST" action="{{form_action}}" enctype="multipart/form-data">
-  <!-- champs texte normaux -->
-  <input type="text" name="name">
-  <!-- champ fichier -->
-  <input type="file" name="image" accept=".jpg,.jpeg,.png,.webp">
-  <button type="submit">Enregistrer</button>
-</form>
-```
+Sans `row_link` → `row_link: ""` dans le JSON → `{{#if row_link}}` est falsy → tableau standard sans lien. Les données sont **toujours** wrappées dans `{ data, row_link, row_link_col }` par le dispatcher.
 
 ---
 
-## Authentification
+## Authentification (plugin_auth)
 
-### Flux login
-```
-POST /login (login=x&mdp=y)
-  → plugin_auth.do_login()
-  → sql dans config_actions.json : SELECT users WHERE login=? AND mdp=?
-  → OK : UUID session → cache mémoire + JWT HS256
-  → dispatcher : cookie session_id (HttpOnly) + jwt_token
-  → redirect vers next= ou LOGIN_REDIRECT
-  → KO : redirect /login?error=1
+### Principe — SQL dans la config
+
+La requête de vérification est définie dans `config_actions.json`. Le plugin mappe les colonnes via leurs alias SQL.
+
+### Convention d'alias
+
+| Alias recommandé | Fallbacks | Rôle |
+|---|---|---|
+| `id` | `id_users`, `id_utilisateur` | Clé primaire |
+| `name` | — | Nom |
+| `first_name` | `firstName`, `prenom` | Prénom |
+| `login` | — | Identifiant |
+| `function` | `role` | Fonction/rôle |
+| `office` | `department` | Bureau (`''` si absent) |
+
+### Exemples config_actions.json
+
+```json
+"POST/login": {
+    "plugin":    "./target/release/libplugin_auth.so",
+    "operation": "login",
+    "sql":       "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
+    "return_type": "redirect",
+    "redirect_to": "/index"
+}
 ```
 
+Table avec email comme identifiant et condition `actif` :
+```json
+"POST/login": {
+    "plugin":    "./target/release/libplugin_auth.so",
+    "operation": "login",
+    "sql":       "SELECT id_utilisateur AS id, nom AS name, prenom AS first_name, email AS login, role AS function, '' AS office FROM utilisateur WHERE email = :login AND mot_de_passe = :mdp AND actif = 1 LIMIT 1",
+    "return_type": "redirect",
+    "redirect_to": "/index"
+}
+```
+
+> **⚠️ Mots de passe bcrypt** : la comparaison SQL directe ne fonctionne pas avec `password_hash()`. Il faut modifier `plugin_auth` pour vérifier avec la crate `bcrypt` côté Rust.
 
 ### Opérations plugin_auth
 
-| Opération | Route conseillée | Description |
+| Opération | Route | Description |
 |---|---|---|
-| `login` | `POST /login` | Authentifie, crée session + JWT |
+| `login` | `POST /login` | Exécute `ctx.sql`, crée session + JWT |
 | `logout` | `GET /logout` | Supprime la session du cache |
 | `me` | `GET /api/me` | Retourne les infos de l'utilisateur courant (JSON) |
 
@@ -458,15 +548,43 @@ POST /login (login=x&mdp=y)
 
 ---
 
+## Upload de fichiers (plugin_upload)
+
+Upload autonome sans SQL métier — stocke fichier + métadonnées dans `uploads`.
+
+---
+
+## Upload + SQL métier (plugin_sql_upload)
+
+### Flux
+```
+POST /insert_user (multipart/form-data)
+  ├─ 1. Parse multipart → champs texte dans params
+  ├─ 2. Validation MIME + taille
+  ├─ 3. UUID.ext → écriture disque
+  ├─ 4. INSERT INTO uploads
+  ├─ 5. params[upload_field] = "uuid.ext"
+  ├─ 6. Exécution SQL métier
+  └─ redirect ou json
+```
+
+Si aucun fichier → `params[upload_field] = ""` → SQL reçoit `NULL`.
+Erreur SQL → fichier supprimé du disque (rollback partiel).
+
+### Astuce UPDATE avec photo optionnelle
+```sql
+UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:id
+```
+
+---
+
 ## Health check (plugin_health)
 
-### Routes
 ```
-GET /health              → JSON brut (monitoring)
+GET /health              → JSON brut
 GET /health/dashboard    → HTML dashboard (auth: true conseillé)
 ```
 
-### JSON retourné
 ```json
 {
   "status": "ok",
@@ -481,14 +599,11 @@ GET /health/dashboard    → HTML dashboard (auth: true conseillé)
 }
 ```
 
-`status` passe en `"warning"` si MySQL ou MongoDB KO, ou si RAM/disque > 90%.
-`plugin_health` utilise `HealthContext` avec son propre `HEALTH_RT` — même pattern que `plugin_mongo`.
+`plugin_health` utilise `HealthContext` avec `HEALTH_RT` autonome — même pattern que `plugin_mongo`.
 
 ---
 
 ## Table MySQL uploads
-
-Utilisée par `plugin_upload` et `plugin_sql_upload`.
 
 ```sql
 CREATE TABLE IF NOT EXISTS uploads (
@@ -503,7 +618,7 @@ CREATE TABLE IF NOT EXISTS uploads (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-dump de la base de données de démonstration dans le dossier ./dump
+Dump de la base de démonstration dans `./dump/`.
 
 ---
 
