@@ -1,5 +1,5 @@
 mod dispatcher;
-
+mod helpers_hbs;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};
 use mongodb::bson;

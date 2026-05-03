@@ -1,4 +1,4 @@
-use handlebars::{DirectorySourceOptionsBuilder, Handlebars};
+use handlebars::{Context, DirectorySourceOptionsBuilder, Handlebars, Helper, HelperDef, HelperResult, Output, RenderContext, Renderable};
 use plugin_core::{ActionContext, AppState, Plugin, PluginResult};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -55,6 +55,7 @@ pub struct ActionConfig {
     pub row_link_col: u8,
 }
 
+
 pub struct Dispatcher {
     config:  HashMap<String, ActionConfig>,
     plugins: HashMap<String, Box<dyn Plugin>>,
@@ -74,6 +75,13 @@ impl Dispatcher {
             .unwrap();
         hbs.register_templates_directory(templates_dir, opts)?;
         hbs.set_strict_mode(false);
+
+        // ── Enregistrement des helpers Handlebars ──────────────────────────────
+        // Tous les helpers sont définis dans src/helpers_hbs.rs
+        crate::helpers_hbs::register_all(&mut hbs);
+
+
+
         println!("Templates Handlebars chargés depuis : {}", templates_dir);
         Ok(Self { config, plugins, hbs: Arc::new(hbs) })
     }

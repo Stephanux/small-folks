@@ -17,12 +17,12 @@
     <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
 
       <label class="form-label" for="{{key}}">{{key}}</label>
-
+      {{!-- TODO : ajouter compare helper pour mettre selected sur l'option --}}
       {{#if (lookup @root.resources key)}}
         <select class="form-input form-select" id="{{key}}" name="{{key}}">
           <option value="">-- choisir --</option>
           {{#each (lookup @root.resources key)}}
-            <option value="{{this.[0]}}">{{this.[1]}}</option>
+              <option value="{{this.[0]}}">{{this.[1]}}</option>
           {{/each}}
         </select>
       {{else}}
@@ -46,8 +46,7 @@
         const form_action = (document.getElementById("formgeneric").action.split('8080/')[1]).split('_')[0];
         console.log("type action : ", form_action);
         {{!-- 
-            // Utilisation du paramètre config_actions.json "form_action" pour détecter le type de formulaire (insertion ou modification) 
-            et dans le cas de l'insertion on efface les données du formulaire via la boucle ci-dessousz
+            // Utilisation du paramètre config_actions.json "form_action" pour détecter le type de formulaire (insertion ou modification) et dans le cas de l'insertion on efface les données du formulaire via la boucle ci-dessousz
         --}}
         if (form_action === "insert") {
             const list_fields = document.getElementsByClassName("form-input");
