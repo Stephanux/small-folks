@@ -2,9 +2,9 @@ use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult
 use sqlx::{Column, Row};
 use serde_json::{json, Map, Value};
 
-pub struct PluginCountries;
+pub struct PluginSQL;
 
-impl Plugin for PluginCountries {
+impl Plugin for PluginSQL {
     fn name(&self) -> &'static str { "sql" }
 
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
@@ -73,12 +73,26 @@ impl Plugin for PluginCountries {
 
                         // Prend les deux premières colonnes : [valeur, label]
                         // Si une seule colonne : valeur = label
+                        // Récupère la valeur courante du champ dans le premier enregistrement
+                        // pour pré-calculer le flag selected (évite ../value en Handlebars)
+                        let current_value = data.first()
+                            .and_then(|row| row.get(field_name.as_str()))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
                         let pairs: Vec<Value> = res_rows.iter().map(|row| {
                             let col0: Option<String> = row.try_get(0).ok();
                             let col1: Option<String> = row.try_get(1).ok();
                             let val   = col0.clone().unwrap_or_default();
-                            let label = col1.unwrap_or_else(|| col0.unwrap_or_default());
-                            json!([val, label])
+                            let label = col1.unwrap_or_else(|| col0.clone().unwrap_or_default());
+                            // selected = true si la valeur de l'option correspond
+                            // à la valeur courante du champ dans les données
+                            json!({
+                                "val":      val.clone(),
+                                "label":    label,
+                                "selected": val == current_value && !current_value.is_empty(),
+                            })
                         }).collect();
 
                         resources.insert(field_name.clone(), Value::Array(pairs));
@@ -148,5 +162,5 @@ fn named_to_positional(
 
 #[no_mangle]
 pub fn plugin_entry(registrar: &mut dyn PluginRegistrar) {
-    registrar.register_plugin(Box::new(PluginCountries));
+    registrar.register_plugin(Box::new(PluginSQL));
 }

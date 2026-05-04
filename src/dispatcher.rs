@@ -1,4 +1,4 @@
-use handlebars::{Context, DirectorySourceOptionsBuilder, Handlebars, Helper, HelperDef, HelperResult, Output, RenderContext, Renderable};
+use handlebars::{DirectorySourceOptionsBuilder, Handlebars};
 use plugin_core::{ActionContext, AppState, Plugin, PluginResult};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -446,21 +446,40 @@ fn urlencoding_encode(s: &str) -> String {
     }
     result
 }
-
+ 
 fn urlencoding_decode(s: &str) -> String {
+    // Remplace d'abord les + par des espaces (application/x-www-form-urlencoded)
     let with_spaces = s.replace('+', " ");
-    let mut result  = String::new();
-    let mut chars   = with_spaces.chars().peekable();
+ 
+    // Collecte tous les octets %XX en séquences complètes avant de décoder en UTF-8.
+    // L'ancienne approche (byte as char) traitait chaque octet séparément
+    // → cassait les séquences multi-octets UTF-8 (ex: é = %C3%A9 → Ã©).
+    let mut bytes  = Vec::new();
+    let mut result = String::new();
+    let mut chars  = with_spaces.chars().peekable();
+ 
     while let Some(c) = chars.next() {
         if c == '%' {
             let h1 = chars.next().unwrap_or('0');
             let h2 = chars.next().unwrap_or('0');
             if let Ok(byte) = u8::from_str_radix(&format!("{}{}", h1, h2), 16) {
-                result.push(byte as char);
+                bytes.push(byte);
             }
         } else {
+            // Flush les octets accumulés en UTF-8 avant d'ajouter le char littéral
+            if !bytes.is_empty() {
+                result.push_str(&String::from_utf8_lossy(&bytes));
+                bytes.clear();
+            }
             result.push(c);
         }
     }
+ 
+    // Flush final des octets restants
+    if !bytes.is_empty() {
+        result.push_str(&String::from_utf8_lossy(&bytes));
+    }
+ 
     result
 }
+

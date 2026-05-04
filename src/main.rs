@@ -5,6 +5,7 @@ use libloading::{Library, Symbol};
 use mongodb::bson;
 use mongodb::options::{AuthMechanism, ClientOptions, Credential};
 use plugin_core::{AppState, Plugin, PluginRegistrar};
+use sqlx::Row;
 use sqlx::mysql::MySqlPoolOptions;
 use std::collections::HashMap;
 use std::env;
@@ -55,13 +56,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Pool MySQL ────────────────────────────────────────────────────────────
     println!("Connexion à la base de données...");
-    let pool = MySqlPoolOptions::new()
+        let pool = MySqlPoolOptions::new()
         .max_connections(10)
         .min_connections(2)
         .acquire_timeout(std::time::Duration::from_secs(5))
+        // Force utf8mb4 sur chaque nouvelle connexion du pool.
+        // sqlx ne propage pas toujours ?charset=utf8mb4 de l'URL vers MariaDB
+        // → SET NAMES est exécuté après chaque ouverture de connexion.
+        .after_connect(|conn, _meta| Box::pin(async move {
+            sqlx::query("SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci")
+                .execute(conn)
+                .await?;
+            Ok(())
+        }))
         .connect(&database_url)
         .await?;
-    println!("Pool MySQL prêt\n");
+        // Vérification du charset de connexion au démarrage
+    let charset_row = sqlx::query("SHOW VARIABLES LIKE 'character_set_connection'")
+        .fetch_one(&pool)
+        .await?;
+    let charset_val: String = charset_row.try_get(1).unwrap_or_else(|_| "inconnu".to_string());
+    println!("Pool MySQL prêt — character_set_connection : {}\n", charset_val);
+
+
 
     // ── Client MongoDB (facultatif) ───────────────────────────────────────────
     // Variables .env :

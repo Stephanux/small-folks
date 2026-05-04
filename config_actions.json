@@ -55,7 +55,7 @@
     },
     "GET/view/user/:id": {
         "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id_users AS CHAR), name, firstName, login, function, office, code_countries FROM users WHERE id_users = :id",
+        "sql":         "SELECT CAST(id_users AS CHAR) AS id_users, name, firstName, login, mdp, function, office, CAST(date_naiss AS CHAR) AS date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone FROM users WHERE id_users = :id",
         "view":        "generics/formGeneric.hbs",
         "form_action": "/update_user",
         "form_columns": 2,
@@ -109,7 +109,7 @@
     },
     "POST/update_user": {
         "plugin": "./target/release/libplugin_sql.so",
-        "sql": "UPDATE countries SET name = :name_us, firstName = :firstName, login = :login, mdp = :mdp, function = :function, office = :office,  date_naiss = :date_naiss, addresse1 = :addresse1, addresse2 = :addresse2, cp = :cp, city = :city,  code_countries = :code_countries, mobile_phone = :mobile_phone, home_phone = :home_phone WHERE id_users = :id_users",
+        "sql": "UPDATE users SET name = :name, firstName = :firstName, login = :login, mdp = :mdp, function = :function, office = :office,  date_naiss = :date_naiss, addresse1 = :addresse1, addresse2 = :addresse2, cp = :cp, city = :city,  code_countries = :code_countries, mobile_phone = :mobile_phone, home_phone = :home_phone WHERE id_users = :id_users",
         "view": "",
         "return_type": "redirect",
         "redirect_to": "/users"

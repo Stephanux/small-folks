@@ -15,17 +15,32 @@
     --}}
     {{#each data.0.fields}}
     <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
-
       <label class="form-label" for="{{key}}">{{key}}</label>
-      {{!-- TODO : ajouter compare helper pour mettre selected sur l'option --}}
+
       {{#if (lookup @root.resources key)}}
+        {{!--
+          Champ avec liste déroulante.
+          Les options arrivent sous la forme :
+            { val: "FR", label: "France", selected: true|false }
+          selected est pré-calculé côté Rust (plugin_sql) en comparant
+          val avec la valeur courante du champ — évite ../value en Handlebars.
+
+          En mode insert (form_action = "insert_XXX") :
+            Les valeurs de data sont vides → selected = false pour toutes les options
+            → "-- choisir --" s'affiche naturellement, pas besoin de cas spécial.
+
+          En mode update (form_action = "update_XXX") :
+            selected = true sur l'option dont val correspond à la valeur du champ.
+        --}}
         <select class="form-input form-select" id="{{key}}" name="{{key}}">
           <option value="">-- choisir --</option>
           {{#each (lookup @root.resources key)}}
-              <option value="{{this.[0]}}">{{this.[1]}}</option>
+            <option value="{{val}}" {{#if selected}}selected{{/if}}>{{label}}</option>
           {{/each}}
         </select>
+
       {{else}}
+        {{!-- Champ texte standard --}}
         <input class="form-input" type="text"
                id="{{key}}" name="{{key}}" value="{{value}}">
       {{/if}}
