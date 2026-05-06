@@ -13,7 +13,6 @@ multer       = "3"
 mime         = "0.3"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 bytes        = "1"
-regex        = "1"
 
 [lib]
 crate-type = ["cdylib"]

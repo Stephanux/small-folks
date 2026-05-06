@@ -1,6 +1,7 @@
 use multer::bytes;
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
@@ -59,6 +60,9 @@ impl Plugin for PluginUpload {
         let upload_dir  = ctx.upload_dir.clone();
         let body_bytes  = ctx.body_bytes.clone();
         let pool        = state.pool.clone();
+        // ctx.sql est la requête d'insertion définie dans config_actions.json.
+        // Si vide → pas d'INSERT (dépôt sur disque uniquement).
+        let sql        = ctx.sql.clone();
 
         get_runtime().block_on(async move {
             process_upload(
@@ -68,6 +72,7 @@ impl Plugin for PluginUpload {
                 allowed,
                 max_bytes,
                 pool,
+                sql,
             ).await
         })
     }
@@ -82,6 +87,7 @@ async fn process_upload(
     allowed:    Vec<String>,
     max_bytes:  u64,
     pool:       sqlx::MySqlPool,
+    sql:        String,
 ) -> PluginResult {
 
     // Crée le dossier de destination s'il n'existe pas
@@ -170,40 +176,55 @@ async fn process_upload(
                     );
                 }
 
-                // Insertion des métadonnées en MySQL
-                let insert_result = sqlx::query(
-                    "INSERT INTO uploads
-                        (uuid, filename, stored_as, mime_type, size_bytes, upload_dir)
-                     VALUES (?, ?, ?, ?, ?, ?)"
-                )
-                .bind(&uuid)
-                .bind(&filename_orig)
-                .bind(&stored_as)
-                .bind(&mime_type)
-                .bind(size_bytes)
-                .bind(&upload_dir)
-                .execute(&pool)
-                .await;
+                // ── INSERT SQL depuis config_actions.json ─────────────────────
+                // Les métadonnées du fichier sont injectées dans params avec des
+                // noms conventionnels : :uuid, :filename, :stored_as,
+                // :mime_type, :size_bytes, :upload_dir
+                // Si sql est vide → pas d'INSERT (dépôt disque uniquement)
+                if !sql.trim().is_empty() {
+                    let mut params: HashMap<String, String> = HashMap::new();
+                    params.insert("uuid".to_string(),       uuid.clone());
+                    params.insert("filename".to_string(),   filename_orig.clone());
+                    params.insert("stored_as".to_string(),  stored_as.clone());
+                    params.insert("mime_type".to_string(),  mime_type.clone());
+                    params.insert("size_bytes".to_string(), size_bytes.to_string());
+                    params.insert("upload_dir".to_string(), upload_dir.clone());
 
-                match insert_result {
-                    Ok(r) => {
-                        results.push(json!({
-                            "id":         r.last_insert_id(),
-                            "uuid":       uuid,
-                            "filename":   filename_orig,
-                            "stored_as":  stored_as,
-                            "mime_type":  mime_type,
-                            "size_bytes": size_bytes,
-                            "upload_dir": upload_dir,
-                        }));
+                    let (sql_prepared, param_values) = plugin_core::named_to_positional(&sql, &params);
+                    let mut query = sqlx::query(&sql_prepared);
+                    for val in &param_values {
+                        query = query.bind(val);
                     }
-                    Err(e) => {
-                        // Fichier écrit mais MySQL a échoué → on supprime le fichier
-                        let _ = tokio::fs::remove_file(&dest_path).await;
-                        return PluginResult::Error(
-                            format!("Erreur MySQL lors de l'insertion : {}", e)
-                        );
+
+                    match query.execute(&pool).await {
+                        Ok(r) => {
+                            results.push(json!({
+                                "id":         r.last_insert_id(),
+                                "uuid":       uuid,
+                                "filename":   filename_orig,
+                                "stored_as":  stored_as,
+                                "mime_type":  mime_type,
+                                "size_bytes": size_bytes,
+                                "upload_dir": upload_dir,
+                            }));
+                        }
+                        Err(e) => {
+                            let _ = tokio::fs::remove_file(&dest_path).await;
+                            return PluginResult::Error(
+                                format!("Erreur SQL lors de l'insertion : {}", e)
+                            );
+                        }
                     }
+                } else {
+                    // Pas de SQL → on retourne quand même les infos du fichier
+                    results.push(json!({
+                        "uuid":       uuid,
+                        "filename":   filename_orig,
+                        "stored_as":  stored_as,
+                        "mime_type":  mime_type,
+                        "size_bytes": size_bytes,
+                        "upload_dir": upload_dir,
+                    }));
                 }
             }
         }

@@ -112,3 +112,27 @@ pub trait Plugin: Send + Sync {
 pub trait PluginRegistrar: Send {
     fn register_plugin(&mut self, plugin: Box<dyn Plugin>);
 }
+
+/// Convertit les paramètres nommés `:param` en `?` positionnels pour sqlx
+/// et retourne les valeurs dans l'ordre d'apparition.
+///
+/// Partagée entre tous les plugins — évite la duplication de code.
+///
+/// # Exemple
+/// ```
+/// // "SELECT * FROM users WHERE login = :login AND mdp = :mdp"
+/// // → ("SELECT * FROM users WHERE login = ? AND mdp = ?", ["steph", "secret"])
+/// ```
+pub fn named_to_positional(
+    sql:    &str,
+    params: &std::collections::HashMap<String, String>,
+) -> (String, Vec<String>) {
+    let re = regex::Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
+    let mut values = Vec::new();
+    let sql_out = re.replace_all(sql, |caps: &regex::Captures| {
+        let name = &caps[1];
+        values.push(params.get(name).cloned().unwrap_or_default());
+        "?"
+    });
+    (sql_out.to_string(), values)
+}

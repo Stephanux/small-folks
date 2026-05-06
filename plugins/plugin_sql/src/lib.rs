@@ -10,7 +10,7 @@ impl Plugin for PluginSQL {
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
         // Convertit les paramètres nommés ":param" en "?" pour sqlx
         // et collecte les valeurs dans l'ordre d'apparition
-        let (sql_prepared, param_values) = named_to_positional(&ctx.sql, &ctx.params);
+        let (sql_prepared, param_values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
         let has_resources = !ctx.data_resources.is_empty();
 
         tokio::task::block_in_place(|| {
@@ -141,23 +141,6 @@ impl Plugin for PluginSQL {
             })
         })
     }
-}
-
-/// Transforme "SELECT * FROM t WHERE code = :code AND name = :name"
-/// en ("SELECT * FROM t WHERE code = ? AND name = ?", ["FR", "France"])
-/// en respectant l'ordre d'apparition des paramètres dans la requête.
-fn named_to_positional(
-    sql: &str,
-    params: &std::collections::HashMap<String, String>,
-) -> (String, Vec<String>) {
-    let re = regex::Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-    let mut values = Vec::new();
-    let sql_out = re.replace_all(sql, |caps: &regex::Captures| {
-        let name = &caps[1];
-        values.push(params.get(name).cloned().unwrap_or_default());
-        "?"
-    });
-    (sql_out.to_string(), values)
 }
 
 #[no_mangle]

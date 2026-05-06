@@ -82,7 +82,7 @@
     "GET/view/user": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone, image FROM users LIMIT 1",
-        "view": "specifics/form_user.hbs",
+        "view": "generics/formGeneric.hbs",
         "return_type": "html",
         "form_action": "/insert_user",
         "form_columns": 2,
@@ -253,6 +253,7 @@
     },
     "POST/upload": {
         "plugin":       "./target/release/libplugin_upload.so",
+        "sql":          "INSERT INTO uploads (uuid, filename, stored_as, mime_type, size_bytes, upload_dir) VALUES (:uuid, :filename, :stored_as, :mime_type, :size_bytes, :upload_dir)",
         "allowed_mime": "image/jpeg,image/png,application/pdf",
         "max_size_mb":  "10",
         "return_type":  "redirect",
@@ -260,7 +261,7 @@
     },
     "GET/uploads": {
         "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT id, filename, stored_as, mime_type, CAST(size_bytes AS CHAR) AS size_bytes, upload_dir, CAST(created_at AS CHAR) AS created_at FROM uploads ORDER BY created_at DESC",
+        "sql":         "SELECT CAST(id AS CHAR) AS id, filename, stored_as, mime_type, CAST(size_bytes AS CHAR) AS size_bytes, upload_dir, CAST(created_at AS CHAR) AS created_at FROM uploads ORDER BY created_at DESC",
         "view":        "generics/upload_list.hbs",
         "return_type": "html"
     },

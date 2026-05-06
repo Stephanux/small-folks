@@ -54,7 +54,7 @@ fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
     }
 
     // Remplacer :login et :mdp par ? pour sqlx
-    let (sql_prepared, param_values) = named_to_positional(&ctx.sql, &ctx.params);
+    let (sql_prepared, param_values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
 
     let session_ttl: u64 = std::env::var("SESSION_TTL_SECONDS")
         .unwrap_or_else(|_| "3600".to_string())
@@ -240,21 +240,6 @@ fn now_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-
-/// Convertit ":param" → "?" et collecte les valeurs dans l'ordre d'apparition
-fn named_to_positional(
-    sql: &str,
-    params: &HashMap<String, String>,
-) -> (String, Vec<String>) {
-    let re = regex::Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-    let mut values = Vec::new();
-    let sql_out = re.replace_all(sql, |caps: &regex::Captures| {
-        let name = &caps[1];
-        values.push(params.get(name).cloned().unwrap_or_default());
-        "?"
-    });
-    (sql_out.to_string(), values)
 }
 
 #[no_mangle]

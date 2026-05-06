@@ -12,7 +12,6 @@
 
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
 use serde_json::json;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 use tokio::runtime::Runtime;
@@ -234,7 +233,7 @@ impl Plugin for PluginSqlUpload {
             }
 
             // ── Étape 5 : exécuter le SQL métier ─────────────────────────────
-            let (sql_prepared, param_values) = named_to_positional(&sql, &params);
+            let (sql_prepared, param_values) = plugin_core::named_to_positional(&sql, &params);
 
             let mut query = sqlx::query(&sql_prepared);
             for val in &param_values {
@@ -291,21 +290,6 @@ fn mime_from_ext(ext: &str) -> String {
         "zip"          => "application/zip",
         _              => "application/octet-stream",
     }.to_string()
-}
-
-/// Convertit ":param" → "?" et collecte les valeurs dans l'ordre d'apparition
-fn named_to_positional(
-    sql: &str,
-    params: &HashMap<String, String>,
-) -> (String, Vec<String>) {
-    let re = regex::Regex::new(r":([a-zA-Z_][a-zA-Z0-9_]*)").unwrap();
-    let mut values = Vec::new();
-    let sql_out = re.replace_all(sql, |caps: &regex::Captures| {
-        let name = &caps[1];
-        values.push(params.get(name).cloned().unwrap_or_default());
-        "?"
-    });
-    (sql_out.to_string(), values)
 }
 
 #[no_mangle]
