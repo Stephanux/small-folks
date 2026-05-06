@@ -11,21 +11,20 @@
         + Nouveau fichier
       </a>
     </p>
-    {{#if this}}
+
+    {{#if data}}
     <table id="data" class="datatable display" style="width:100%">
       <thead>
         <tr>
-          {{#each this.0}}
-          <th>{{@key}}</th>
-          {{/each}}
+          {{#each data}}{{#if @first}}
+            {{#each this}}<th>{{@key}}</th>{{/each}}
+          {{/if}}{{/each}}
         </tr>
       </thead>
       <tbody>
-        {{#each this}}
+        {{#each data}}
         <tr>
-          {{#each this}}
-          <td>{{this}}</td>
-          {{/each}}
+          {{#each this}}<td>{{this}}</td>{{/each}}
         </tr>
         {{/each}}
       </tbody>
@@ -33,7 +32,50 @@
     {{else}}
     <p style="color:#888; font-style:italic;">Aucun fichier uploadé pour l'instant.</p>
     {{/if}}
+
   </div>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const tables = document.querySelectorAll('table');
+  tables.forEach(function(t) {
 
+    {{#if row_link}}
+    {{!-- Avec lien sur la colonne row_link_col --}}
+    new DataTable(t, {
+      pageLength: 25,
+      language: {
+        search:     "Rechercher :",
+        lengthMenu: "Afficher _MENU_ lignes",
+        info:       "Lignes _START_ à _END_ sur _TOTAL_",
+        paginate:   { previous: "Préc.", next: "Suiv." }
+      },
+      columnDefs: [
+        {
+          targets: {{row_link_col}},
+          render: function(data, type, row, meta) {
+            if (type === 'display') {
+              return '<a href="{{row_link}}/' + data + '">' + data + '</a>';
+            }
+            return data;
+          }
+        }
+      ]
+    });
+    {{else}}
+    {{!-- Sans lien --}}
+    new DataTable(t, {
+      pageLength: 25,
+      language: {
+        search:     "Rechercher :",
+        lengthMenu: "Afficher _MENU_ lignes",
+        info:       "Lignes _START_ à _END_ sur _TOTAL_",
+        paginate:   { previous: "Préc.", next: "Suiv." }
+      }
+    });
+    {{/if}}
+
+  });
+});
+</script>
 {{> partials/footer}}

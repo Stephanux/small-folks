@@ -21,6 +21,8 @@ use handlebars::{Context, Handlebars, Helper, HelperDef, HelperResult, Output, R
 /// À appeler une seule fois dans `Dispatcher::new()`.
 pub fn register_all(hbs: &mut Handlebars) {
     hbs.register_helper("compare", Box::new(CompareHelper));
+        // eq, gt, lt, gte, lte, ne, and, or, not sont des helpers NATIFS
+    // de Handlebars Rust — pas besoin de les enregistrer manuellement
     // ← ajouter les futurs helpers ici
 }
 

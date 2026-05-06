@@ -270,11 +270,13 @@ impl Dispatcher {
 
                             // ── Logout ────────────────────────────────────────
                             PluginResult::AuthLogout { redirect_to } => {
-                                return Ok(Response::builder(303)
-                                    .header("Location",   &redirect_to)
-                                    .header("Set-Cookie", "session_id=; Path=/; Max-Age=0; HttpOnly")
-                                    .header("Set-Cookie", "jwt_token=; Path=/; Max-Age=0")
-                                    .build());
+                                let mut res = tide::Response::new(303);
+                                res.insert_header("Location", redirect_to.as_str());
+                                res.insert_header("Set-Cookie",
+                                    "session_id=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+                                res.append_header("Set-Cookie",
+                                    "jwt_token=; Path=/; Max-Age=0; SameSite=Lax");
+                                return Ok(res);
                             }
                         }
                     }
@@ -302,26 +304,30 @@ impl Dispatcher {
                         view_name, 
                         serde_json::to_string_pretty(&data).unwrap_or_default()
                     );
-                    // Toujours wrapper les données dans { data, row_link, row_link_col }
-                    // pour que {{#if row_link}} fonctionne dans tableGeneric
-                    // même quand row_link est absent (chaîne vide = falsy en Handlebars)
-                    let data = match &data {
-                        // Déjà enrichi par plugin_sql (form) → ne pas re-wrapper
-                        serde_json::Value::Object(m) if m.contains_key("data") => data,
-                        // Array brut ou objet simple → wrapper systématique
-                        _ => {
+                    // ── Wrapping conditionnel ─────────────────────────────────────
+                    // Seuls les Arrays SQL sont wrappés dans { data, row_link, row_link_col }
+                    // pour tableGeneric.
+                    // Les Objects custom (health_dashboard, etc.) passent INTACTS
+                    // → {{status}}, {{sessions.active}} etc. fonctionnent directement.
+                    let data = match data {
+                        // Array SQL → wrapper avec row_link pour tableGeneric
+                        serde_json::Value::Array(_) => {
                             let mut w = serde_json::Map::new();
-                            w.insert("data".into(), data);
                             w.insert("row_link".into(),
                                 serde_json::Value::String(
                                     ctx.row_link.clone().unwrap_or_default()
                                 ));
                             w.insert("row_link_col".into(),
                                 serde_json::Value::Number(ctx.row_link_col.into()));
+                            w.insert("data".into(), data);
                             serde_json::Value::Object(w)
                         }
+                        // Déjà enrichi par plugin_sql (formGeneric) → intact
+                        serde_json::Value::Object(ref m) if m.contains_key("data") => data,
+                        // Object custom (health_dashboard, auth...) → intact
+                        other => other,
                     };
-
+                    
                     // Injecter form_action + form_columns + form_fullwidth_fields
                     // si défini et que les données ne sont pas déjà enrichies par plugin_sql
                     let data = if let Some(fa) = &ctx.form_action {
