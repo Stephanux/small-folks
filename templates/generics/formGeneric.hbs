@@ -38,12 +38,18 @@
             <option value="{{val}}" {{#if selected}}selected{{/if}}>{{label}}</option>
           {{/each}}
         </select>
-
       {{else}}
-        {{!-- Champ texte standard --}}
-        <input class="form-input" type="text"
-               id="{{key}}" name="{{key}}" value="{{value}}">
-      {{/if}}
+          {{#if (eq key "image")}}
+              <label for="file" style="display:block; margin-bottom:.4rem; font-weight:500;">
+                  Fichier (jpg, png, pdf — max 5 Mo)
+              </label>
+              <input type="file" id="image" name="image"
+                  accept=".jpg,.jpeg,.png,.pdf"
+                  style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
+          {{else}}
+              <input class="form-input" type="text" id="{{key}}" name="{{key}}" value="{{value}}">
+          {{/if}}
+        {{/if}}
 
     </div>
     {{/each}}
