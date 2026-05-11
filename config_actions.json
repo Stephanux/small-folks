@@ -98,14 +98,14 @@
         }
     },
     "POST/insert_user": {
-        "plugin":        "./target/release/libplugin_sql_upload.so",
-        "sql":           "INSERT INTO users (name, firstName, login, mdp, function, office, date_naiss, addresse1, addresse2, cp, city, code_countries, mobile_phone, home_phone, image) VALUES (:name, :firstName, :login, :mdp, :function, :office, :date_naiss, :addresse1, :addresse2, :cp, :city,:code_countries, :mobile_phone, :home_phone, :image)",
-        "upload_field":  "image",
-        "allowed_mime":  "image/jpeg,image/png,image/webp",
-        "max_size_mb":   "5",
-        "return_type":   "redirect",
-        "redirect_to":   "/users",
-        "auth":          true
+        "plugin":       "./target/release/libplugin_sql_upload.so",
+        "sql":          "INSERT INTO users (name, firstName, image) VALUES (:name, :firstName, :image)",
+        "sql_upload":   "INSERT INTO uploads (uuid, filename, stored_as, mime_type, size_bytes, upload_dir) VALUES (:uuid, :filename, :stored_as, :mime_type, :size_bytes, :upload_dir)",
+        "upload_field": "image",
+        "allowed_mime": "image/jpeg,image/png",
+        "return_type":  "redirect",
+        "redirect_to":  "/users",
+        "auth":         true
     },
     "POST/update_user": {
         "plugin": "./target/release/libplugin_sql.so",

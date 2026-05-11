@@ -71,6 +71,9 @@ impl Plugin for PluginSqlUpload {
         let upload_field = ctx.upload_field.clone();
         let body_bytes   = ctx.body_bytes.clone();
         let sql          = ctx.sql.clone();
+        // sql_upload : requête INSERT pour la table uploads
+        // définie dans config_actions.json — si vide, pas d'INSERT dans uploads
+        let sql_upload   = ctx.sql_upload.clone();
         let mut params   = ctx.params.clone();
         let pool         = state.pool.clone();
 
@@ -193,31 +196,37 @@ impl Plugin for PluginSqlUpload {
             }
 
             // ── Étape 3 : INSERT dans uploads (si fichier présent) ────────────
+            // La requête est définie dans config_actions.json via "sql_upload".
+            // Paramètres nommés disponibles : :uuid, :filename, :stored_as,
+            //                                 :mime_type, :size_bytes, :upload_dir
+            // Si sql_upload est vide → on saute l'INSERT dans uploads.
             if let (Some(stored_as), Some(uuid_s), Some(fname), Some(mime), Some(size))
                 = (&file_stored_as, &file_uuid, &file_name_orig, &file_mime, &file_size)
             {
-                let insert_upload = sqlx::query(
-                    "INSERT INTO uploads
-                        (uuid, filename, stored_as, mime_type, size_bytes, upload_dir)
-                     VALUES (?, ?, ?, ?, ?, ?)"
-                )
-                .bind(uuid_s)
-                .bind(fname)
-                .bind(stored_as)
-                .bind(mime)
-                .bind(size)
-                .bind(&upload_dir)
-                .execute(&pool)
-                .await;
+                if !sql_upload.trim().is_empty() {
+                    let mut upload_params = std::collections::HashMap::new();
+                    upload_params.insert("uuid".to_string(),       uuid_s.clone());
+                    upload_params.insert("filename".to_string(),   fname.clone());
+                    upload_params.insert("stored_as".to_string(),  stored_as.clone());
+                    upload_params.insert("mime_type".to_string(),  mime.clone());
+                    upload_params.insert("size_bytes".to_string(), size.to_string());
+                    upload_params.insert("upload_dir".to_string(), upload_dir.clone());
 
-                if let Err(e) = insert_upload {
-                    // Fichier écrit mais MySQL KO → on supprime le fichier orphelin
-                    let _ = tokio::fs::remove_file(
-                        format!("{}/{}", upload_dir, stored_as)
-                    ).await;
-                    return PluginResult::Error(
-                        format!("Erreur INSERT uploads : {}", e)
-                    );
+                    let (sql_up_prep, up_values) =
+                        plugin_core::named_to_positional(&sql_upload, &upload_params);
+
+                    let mut q = sqlx::query(&sql_up_prep);
+                    for val in &up_values { q = q.bind(val); }
+
+                    if let Err(e) = q.execute(&pool).await {
+                        // Fichier écrit mais MySQL KO → on supprime le fichier orphelin
+                        let _ = tokio::fs::remove_file(
+                            format!("{}/{}", upload_dir, stored_as)
+                        ).await;
+                        return PluginResult::Error(
+                            format!("Erreur INSERT uploads : {}", e)
+                        );
+                    }
                 }
 
                 // ── Étape 4 : injecter stored_as dans params ──────────────────
@@ -231,6 +240,7 @@ impl Plugin for PluginSqlUpload {
                 // et qu'on n'injecte pas de valeur — on insère explicitement None
                 params.insert(upload_field.clone(), String::new());
             }
+
 
             // ── Étape 5 : exécuter le SQL métier ─────────────────────────────
             let (sql_prepared, param_values) = plugin_core::named_to_positional(&sql, &params);

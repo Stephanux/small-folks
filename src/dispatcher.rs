@@ -26,7 +26,11 @@ pub struct ActionConfig {
     /// Nom du champ fichier dans le formulaire multipart (plugin_sql_upload)
     #[serde(default)]
     pub upload_field: String,
-     // Ressources pour listes déroulantes
+    /// Requête INSERT pour la table uploads (plugin_sql_upload)
+    /// Si vide → pas d'INSERT dans uploads
+    #[serde(default)]
+    pub sql_upload:   String,
+    // Ressources pour listes déroulantes
     // data_resources : { "nom_colonne": "nom_ressource" }
     #[serde(default)]
     pub data_resources: std::collections::HashMap<String, String>,
@@ -155,6 +159,7 @@ impl Dispatcher {
             operation:    action.operation.clone().unwrap_or_else(|| "find".to_string()),
             upload_dir,
             upload_field: action.upload_field.clone(),
+            sql_upload:    action.sql_upload.clone(),
             row_link:      action.row_link.clone(),
             row_link_col:  action.row_link_col,
             allowed_mime: action.allowed_mime.clone()
