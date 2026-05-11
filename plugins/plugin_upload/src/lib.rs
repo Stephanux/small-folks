@@ -243,7 +243,7 @@ async fn process_upload(
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Extrait le boundary depuis le Content-Type.
+/// Extrait le boundary depuis le ContentType.
 /// "multipart/form-data; boundary=----WebKitFormBoundary7MA4YWxkTrZu0gW"
 /// →  "----WebKitFormBoundary7MA4YWxkTrZu0gW"
 fn extract_boundary(content_type: &str) -> Option<String> {

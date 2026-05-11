@@ -6,6 +6,7 @@
 
 Framework web **Rust** basé sur **Tide** avec un système de plugins dynamiques (`cdylib`).
 Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées dans `config_actions.json` **sans recompilation**.
+NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilsable en production.
 
 ---
 
