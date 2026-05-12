@@ -41,6 +41,7 @@ small-folks/
 ├── src/
 │   ├── main.rs                      ← démarrage, pools, précache plugins
 │   ├── dispatcher.rs                ← résolution routes, rendu, auth
+│   ├── app_security.rs              ← module contenant des fonctions de vérification (XSS)
 │   └── helpers_hbs.rs               ← helpers Handlebars personnalisés
 ├── plugins/                         ← tous les plugins en edition 2021
 │   ├── plugin-core/src/lib.rs       ← traits et types partagés (FFI)
