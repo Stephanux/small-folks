@@ -1,4 +1,5 @@
 mod dispatcher;
+mod app_security;
 mod helpers_hbs;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};

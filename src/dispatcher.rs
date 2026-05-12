@@ -1,4 +1,5 @@
 use handlebars::{DirectorySourceOptionsBuilder, Handlebars};
+use crate::app_security::{sanitize_header, sanitize_html, sanitize_log, sanitize_redirect};
 use plugin_core::{ActionContext, AppState, Plugin, PluginResult};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -158,7 +159,7 @@ impl Dispatcher {
             filter:       action.filter.clone().unwrap_or_else(|| "{}".to_string()),
             operation:    action.operation.clone().unwrap_or_else(|| "find".to_string()),
             upload_dir,
-            upload_field: action.upload_field.clone(),
+            upload_field:  action.upload_field.clone(),
             sql_upload:    action.sql_upload.clone(),
             row_link:      action.row_link.clone(),
             row_link_col:  action.row_link_col,
@@ -204,7 +205,7 @@ impl Dispatcher {
                         .content_type("application/json")
                         .build());
                 } else {
-                    let login_url = format!("/login?next={}", urlencoding_encode(&path));
+                    let login_url = format!("/login?next={}", urlencoding_encode(&sanitize_redirect(&path)));
                     return Ok(Response::builder(303)
                         .header("Location", login_url.as_str())
                         .build());
@@ -250,7 +251,7 @@ impl Dispatcher {
                                     "Set-Cookie",
                                     format!(
                                         "session_id={}; Path=/; Max-Age={}; HttpOnly; SameSite=Lax",
-                                        session_id, session_ttl
+                                        sanitize_header(&session_id), session_ttl
                                     ).as_str(),
                                 );
                                 // Cookie jwt — accessible JS pour les appels API
@@ -259,7 +260,7 @@ impl Dispatcher {
                                     "Set-Cookie",
                                     format!(
                                         "jwt_token={}; Path=/; Max-Age={}; SameSite=Lax",
-                                        jwt, session_ttl
+                                        sanitize_header(&jwt), session_ttl
                                     ).as_str(),
                                 );
                                 return Ok(res);
@@ -306,7 +307,7 @@ impl Dispatcher {
                     let view_name = ctx.view.trim_end_matches(".hbs");
                     // DEBUG temporaire — à supprimer après diagnostic
                     println!("[dispatcher] data envoyée au template '{}' :\n{}", 
-                        view_name, 
+                        sanitize_log(view_name), 
                         serde_json::to_string_pretty(&data).unwrap_or_default()
                     );
                     // ── Wrapping conditionnel ─────────────────────────────────────
@@ -380,9 +381,10 @@ impl Dispatcher {
                     
                 }
                 "redirect" => {
-                    let target = ctx.redirect_to.as_deref().unwrap_or("/");
+                    let raw    = ctx.redirect_to.as_deref().unwrap_or("/");
+                    let target = sanitize_redirect(raw);
                     Ok(Response::builder(303)
-                        .header("Location", target)
+                        .header("Location", target.as_str())
                         .build())
                 }
                 other => self.render_error(500,
@@ -419,8 +421,11 @@ impl Dispatcher {
     }
 
     fn render_error(&self, status: u16, msg: &str) -> tide::Result {
+        // sanitize_html protège contre le XSS si le message contient
+        // des données utilisateur (ex: nom de plugin, erreur SQL)
+        let safe_msg = sanitize_html(msg);
         Ok(Response::builder(status)
-            .body(serde_json::json!({ "error": msg }).to_string())
+            .body(serde_json::json!({ "error": safe_msg }).to_string())
             .content_type("application/json")
             .build())
     }
