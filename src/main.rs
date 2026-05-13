@@ -1,6 +1,7 @@
 mod dispatcher;
 mod app_security;
 mod helpers_hbs;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
+mod mqtt_worker;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};
 use mongodb::bson;
@@ -79,6 +80,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let charset_val: String = charset_row.try_get(1).unwrap_or_else(|_| "inconnu".to_string());
     println!("Pool MySQL prêt — character_set_connection : {}\n", charset_val);
 
+    // ── Client MQTT (optionnel) ───────────────────────────────────────────────
+    // Démarré automatiquement si MQTT_BROKER_URL est défini dans .env
+    println!("std::env::var(\"MQTT_BROKER_URL\") : {:?}",  std::env::var("MQTT_BROKER_URL"));
+    if std::env::var("MQTT_BROKER_URL").is_ok() {
+        println!("MQTT activé — démarrage du worker en fond...");
+        let mqtt_pool = pool.clone();
+        tokio::spawn(async move {
+            mqtt_worker::start(mqtt_pool).await;
+        });
+    } else {
+        println!("MQTT_BROKER_URL absent — worker MQTT désactivé\n");
+    }
 
 
     // ── Client MongoDB (facultatif) ───────────────────────────────────────────

@@ -274,5 +274,46 @@
         "plugin":      "./target/release/libplugin_sql.so",
         "sql":         "DELETE FROM uploads WHERE uuid = :uuid",
         "return_type": "json"
+    },
+    "GET/capteurs": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs ORDER BY timestamp DESC LIMIT 100",
+        "view":        "generics/tableGeneric.hbs",
+        "return_type": "html",
+        "auth":        true,
+        "row_link":    "/capteurs/detail",
+        "row_link_col": 1
+    },
+    "GET/api/capteurs": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs ORDER BY timestamp DESC LIMIT 100",
+        "return_type": "json",
+        "auth":        true
+    },
+    "GET/api/capteurs/:sensor_id": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs WHERE sensor_id = :sensor_id ORDER BY timestamp DESC LIMIT 50",
+        "return_type": "json",
+        "auth":        true
+    },
+    "GET/api/capteurs/stats": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT sensor_id, CAST(COUNT(*) AS CHAR) AS total, CAST(AVG(temperature) AS CHAR) AS temp_moy, CAST(MIN(temperature) AS CHAR) AS temp_min, CAST(MAX(temperature) AS CHAR) AS temp_max, CAST(AVG(humidity) AS CHAR) AS hum_moy FROM capteurs GROUP BY sensor_id",
+        "return_type": "json",
+        "auth":        true
+    },
+    "GET/capteurs/chart": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs ORDER BY timestamp DESC LIMIT 200",
+        "view":        "specifics/chart_capteurs.hbs",
+        "return_type": "html",
+        "auth":        true
+    },
+    "GET/capteurs/chart/:sensor_id": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs WHERE sensor_id = :sensor_id ORDER BY timestamp DESC LIMIT 200",
+        "view":        "specifics/chart_capteurs.hbs",
+        "return_type": "html",
+        "auth":        true
     }
 }

@@ -1,0 +1,236 @@
+{{> partials/header page_title="Courbes capteurs"}}
+{{> partials/nav}}
+
+<div class="container">
+  <div class="card" style="padding:1.5rem;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.2rem; flex-wrap:wrap; gap:.8rem;">
+      <h1 style="margin:0; font-size:1.4rem;">Courbes température &amp; humidité</h1>
+      <div style="display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;">
+
+        {{!-- Sélecteur de capteur --}}
+        <select id="sensorSelect" class="form-input form-select"
+                style="width:auto; padding:.4rem .9rem;"
+                onchange="filterBySensor(this.value)">
+          <option value="">Tous les capteurs</option>
+          {{!-- Options peuplées dynamiquement depuis sensorIds --}}
+        </select>
+
+        {{!-- Sélecteur de période --}}
+        <select id="rangeSelect" class="form-input form-select"
+                style="width:auto; padding:.4rem .9rem;"
+                onchange="filterByRange(this.value)">
+          <option value="50">50 dernières mesures</option>
+          <option value="100" selected>100 dernières mesures</option>
+          <option value="200">200 dernières mesures</option>
+          <option value="500">500 dernières mesures</option>
+        </select>
+
+        <a href="/capteurs" style="padding:.4rem .9rem; background:#534AB7; color:#fff;
+           border-radius:6px; font-size:.85rem; text-decoration:none;">
+          Tableau
+        </a>
+      </div>
+    </div>
+
+    {{!-- Graphique température --}}
+    <div style="position:relative; height:280px; margin-bottom:1.5rem;">
+      <canvas id="chartTemp"></canvas>
+    </div>
+
+    {{!-- Graphique humidité --}}
+    <div style="position:relative; height:280px;">
+      <canvas id="chartHum"></canvas>
+    </div>
+
+    {{!-- Stats rapides --}}
+    <div id="stats" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+         gap:.8rem; margin-top:1.5rem;"></div>
+
+  </div>
+</div>
+
+{{!-- Injection des données JSON brutes — triple accolades = pas d'échappement HTML --}}
+<script>
+const RAW_DATA = {{{json data}}};
+</script>
+
+{{!-- Chart.js depuis CDN --}}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<script>
+// ── Données et état ──────────────────────────────────────────────────────────
+let allData    = RAW_DATA || [];
+let chartTemp  = null;
+let chartHum   = null;
+
+// Couleurs par sensor_id (générées dynamiquement)
+const COLORS = [
+  '#534AB7', '#1D9E75', '#D85A30', '#BA7517',
+  '#378ADD', '#D44FA0', '#4DB8A4', '#8A6FBF',
+];
+const colorMap = {};
+function colorFor(sensorId) {
+  if (!colorMap[sensorId]) {
+    const idx = Object.keys(colorMap).length % COLORS.length;
+    colorMap[sensorId] = COLORS[idx];
+  }
+  return colorMap[sensorId];
+}
+
+// ── Filtrage ──────────────────────────────────────────────────────────────────
+function getFilteredData() {
+  const sensor = document.getElementById('sensorSelect').value;
+  const limit  = parseInt(document.getElementById('rangeSelect').value) || 100;
+  let filtered = sensor ? allData.filter(r => r.sensor_id === sensor) : allData;
+  return filtered.slice(-limit);
+}
+
+// ── Rendu des graphiques ──────────────────────────────────────────────────────
+function renderCharts() {
+  const filtered   = getFilteredData();
+  const sensorIds  = [...new Set(filtered.map(r => r.sensor_id))];
+
+  // Datasets par sensor_id
+  const datasetsTemp = sensorIds.map(sid => ({
+    label:           sid,
+    data:            filtered.filter(r => r.sensor_id === sid)
+                             .map(r => ({ x: r.timestamp, y: parseFloat(r.temperature) })),
+    borderColor:     colorFor(sid),
+    backgroundColor: colorFor(sid) + '22',
+    borderWidth:     2,
+    pointRadius:     2,
+    tension:         0.3,
+    fill:            false,
+  }));
+
+  const datasetsHum = sensorIds.map(sid => ({
+    label:           sid,
+    data:            filtered.filter(r => r.sensor_id === sid)
+                             .map(r => ({ x: r.timestamp, y: parseFloat(r.humidity) })),
+    borderColor:     colorFor(sid),
+    backgroundColor: colorFor(sid) + '22',
+    borderWidth:     2,
+    pointRadius:     2,
+    tension:         0.3,
+    fill:            false,
+  }));
+
+  const commonOptions = {
+    responsive:          true,
+    maintainAspectRatio: false,
+    interaction:         { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'top', labels: { font: { size: 11 } } },
+      tooltip: {
+        callbacks: {
+          title: items => items[0]?.label?.substring(0, 19) ?? '',
+        }
+      }
+    },
+    scales: {
+      x: {
+        type:    'category',
+        ticks:   { maxTicksLimit: 10, font: { size: 10 },
+                   callback: (_, i, ticks) => {
+                     const lbl = ticks[i]?.label ?? '';
+                     return lbl.substring(11, 19); // HH:MM:SS
+                   }},
+        grid:    { color: 'rgba(128,128,128,.1)' },
+      }
+    }
+  };
+
+  // ── Température ──────────────────────────────────────────────────────────
+  if (chartTemp) chartTemp.destroy();
+  chartTemp = new Chart(document.getElementById('chartTemp'), {
+    type: 'line',
+    data: { datasets: datasetsTemp },
+    options: {
+      ...commonOptions,
+      plugins: {
+        ...commonOptions.plugins,
+        title: { display: true, text: 'Température (°C)', font: { size: 13 } },
+      },
+      scales: {
+        ...commonOptions.scales,
+        y: { title: { display: true, text: '°C' },
+             grid: { color: 'rgba(128,128,128,.1)' } }
+      }
+    }
+  });
+
+  // ── Humidité ─────────────────────────────────────────────────────────────
+  if (chartHum) chartHum.destroy();
+  chartHum = new Chart(document.getElementById('chartHum'), {
+    type: 'line',
+    data: { datasets: datasetsHum },
+    options: {
+      ...commonOptions,
+      plugins: {
+        ...commonOptions.plugins,
+        title: { display: true, text: 'Humidité (%)', font: { size: 13 } },
+      },
+      scales: {
+        ...commonOptions.scales,
+        y: { min: 0, max: 100,
+             title: { display: true, text: '%' },
+             grid: { color: 'rgba(128,128,128,.1)' } }
+      }
+    }
+  });
+
+  renderStats(filtered, sensorIds);
+}
+
+// ── Statistiques rapides ──────────────────────────────────────────────────────
+function renderStats(filtered, sensorIds) {
+  const container = document.getElementById('stats');
+  if (!filtered.length) { container.innerHTML = ''; return; }
+
+  container.innerHTML = sensorIds.map(sid => {
+    const rows  = filtered.filter(r => r.sensor_id === sid);
+    const temps = rows.map(r => parseFloat(r.temperature));
+    const hums  = rows.map(r => parseFloat(r.humidity));
+    const avg   = arr => (arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1);
+    const color = colorFor(sid);
+    return `
+      <div class="card-metric" style="border-left:3px solid ${color};">
+        <div class="metric-title">${sid}</div>
+        <div style="font-size:.82rem; margin-top:.4rem; display:flex; flex-direction:column; gap:.2rem;">
+          <span>🌡 moy <strong>${avg(temps)}°C</strong>
+                min ${Math.min(...temps).toFixed(1)} max ${Math.max(...temps).toFixed(1)}</span>
+          <span>💧 moy <strong>${avg(hums)}%</strong>
+                min ${Math.min(...hums).toFixed(1)} max ${Math.max(...hums).toFixed(1)}</span>
+          <span style="color:#888; font-size:.78rem;">${rows.length} mesure(s)</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// ── Filtres ───────────────────────────────────────────────────────────────────
+function filterBySensor() { renderCharts(); }
+function filterByRange()  { renderCharts(); }
+
+// ── Initialisation ────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  // Peupler le sélecteur de capteurs
+  const sensorIds = [...new Set(allData.map(r => r.sensor_id))].sort();
+  const sel = document.getElementById('sensorSelect');
+  sensorIds.forEach(sid => {
+    const opt = document.createElement('option');
+    opt.value = sid; opt.textContent = sid;
+    sel.appendChild(opt);
+  });
+
+  if (!allData.length) {
+    document.querySelector('.card').innerHTML +=
+      '<p style="color:#888; text-align:center; margin-top:2rem;">Aucune donnée disponible.</p>';
+    return;
+  }
+
+  renderCharts();
+});
+</script>
+
+{{> partials/footer}}

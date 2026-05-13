@@ -15,12 +15,13 @@
 //! helpers_hbs::register_all(&mut hbs);
 //! ```
 
-use handlebars::{Context, Handlebars, Helper, HelperDef, HelperResult, Output, Renderable, RenderContext};
+use handlebars::{Context, Handlebars, Helper, HelperDef, HelperResult, Output, Renderable, RenderContext, ScopedJson};
 
 /// Enregistre tous les helpers dans l'instance Handlebars.
 /// À appeler une seule fois dans `Dispatcher::new()`.
 pub fn register_all(hbs: &mut Handlebars) {
     hbs.register_helper("compare", Box::new(CompareHelper));
+    hbs.register_helper("json",    Box::new(JsonHelper));
         // eq, gt, lt, gte, lte, ne, and, or, not sont des helpers NATIFS
     // de Handlebars Rust — pas besoin de les enregistrer manuellement
     // ← ajouter les futurs helpers ici
@@ -102,5 +103,44 @@ where
         num_op(ln, rn)
     } else {
         str_op(l, r)
+    }
+}
+
+// ── Helper : json ─────────────────────────────────────────────────────────────
+//
+// Sérialise une valeur Handlebars en JSON brut pour injection dans <script>.
+// À utiliser avec TRIPLE accolades pour désactiver l'échappement HTML :
+//
+//   {{{json data}}}       ← tableau JSON complet
+//   {{{json data.0}}}     ← premier élément seulement
+//
+// Sans les triples accolades, les " seraient transformés en &quot;
+// et le JSON serait invalide en JavaScript.
+//
+// Exemple dans un template :
+//   <script>
+//     const rows = {{{json data}}};
+//     const labels = rows.map(r => r.timestamp);
+//     const temps  = rows.map(r => parseFloat(r.temperature));
+//   </script>
+
+struct JsonHelper;
+
+impl HelperDef for JsonHelper {
+    fn call_inner<'reg: 'rc, 'rc>(
+        &self,
+        h:  &Helper<'rc>,
+        _:  &'reg Handlebars<'reg>,
+        _:  &'rc Context,
+        _:  &mut RenderContext<'reg, 'rc>,
+    ) -> Result<ScopedJson<'rc>, handlebars::RenderError> {
+        let value = h.param(0)
+            .map(|v| v.value().clone())
+            .unwrap_or(serde_json::Value::Null);
+
+        let json_str = serde_json::to_string(&value)
+            .unwrap_or_else(|_| "null".to_string());
+
+        Ok(ScopedJson::Derived(serde_json::Value::String(json_str)))
     }
 }
