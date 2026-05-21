@@ -1,0 +1,26 @@
+[package]
+name    = "ebpf-firewall"
+version = "0.1.0"
+edition = "2021"
+
+# Ce crate est compilé pour la VM BPF du kernel, pas pour l'hôte.
+# Ne pas inclure dans le workspace principal — cible différente.
+# Commande de build :
+#   cargo build --release  (depuis ce dossier)
+# Prérequis :
+#   rustup component add rust-src
+#   cargo install bpf-linker
+
+[workspace]  # ← déclare son propre workspace, isolé du parent
+
+[dependencies]
+aya-ebpf     = "0.1"
+aya-log-ebpf = "0.1"
+
+[[bin]]
+name = "ebpf-firewall"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto       = true

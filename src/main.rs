@@ -2,6 +2,7 @@ mod dispatcher;
 mod app_security;
 mod helpers_hbs;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
 mod mqtt_worker;   // ← nouveau pour gérer les helpers handlebars dans le dispatcher
+mod ebpf_worker;  // ← décommenter quand EBPF_ENABLED=true
 use dispatcher::Dispatcher;
 use libloading::{Library, Symbol};
 use mongodb::bson;
@@ -171,8 +172,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = Handle::current();
     // Cache de sessions partagé entre tous les handlers
     let sessions = Arc::new(Mutex::new(HashMap::new()));
+    let state  = AppState { pool: pool.clone(), handle, mongo, sessions};
 
-    let state  = AppState { pool, handle, mongo, sessions};
+    // ── Firewall eBPF/XDP (optionnel) ────────────────────────────────────────
+    // Prérequis avant de décommenter :
+    //   1. Décommenter dans Cargo.toml  : aya = { version = "0.12", features = ["async_tokio"] }
+    //   2. Décommenter en tête de fichier : mod ebpf_worker;
+    //   3. Compiler le kernel BPF       : cd ebpf-firewall && cargo build --release
+    //   4. Dans .env                    : EBPF_ENABLED=true, EBPF_INTERFACE=eth0
+    //   5. Lancer avec sudo ou CAP_BPF  : sudo ./target/release/small-folks
+    //
+    if std::env::var("EBPF_ENABLED").map(|v| v == "true").unwrap_or(false) {
+        println!("[main] eBPF firewall activé — démarrage du worker...");
+        let ebpf_pool = pool.clone();
+        tokio::spawn(async move {
+            ebpf_worker::start(ebpf_pool).await;
+        });
+    } else {
+        println!("[main] EBPF_ENABLED absent ou false — firewall XDP désactivé");
+    }
 
     // ── Précache des plugins au démarrage ────────────────────────────────────
     // On collecte les chemins uniques de plugins référencés dans le JSON

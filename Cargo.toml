@@ -31,3 +31,6 @@ regex        = "1"
 bytes        = "1"
 rumqttc      = { version = "0.24", features = ["use-rustls"] }
 chrono       = { version = "0.4", features = ["serde"] }
+# eBPF userspace (décommenter si EBPF_ENABLED=true)
+aya          = { version = "0.12", features = ["async_tokio"] }
+

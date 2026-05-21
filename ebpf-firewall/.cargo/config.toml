@@ -1,0 +1,9 @@
+# Force la compilation vers la VM BPF du kernel Linux (little-endian)
+# bpfel = BPF little-endian (x86_64, ARM64)
+# bpfeb = BPF big-endian    (MIPS, PowerPC) — rare
+[build]
+target = "bpfel-unknown-none"
+
+# Nécessaire : rust-src pour compiler core sans std
+[unstable]
+build-std = ["core"]
