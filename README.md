@@ -6,7 +6,7 @@
 
 Framework web **Rust** basé sur **Tide** avec un système de plugins dynamiques (`cdylib`).
 Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées dans `config_actions.json` **sans recompilation**.
-NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilsable en production.
+NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilisable en production.
 
 ---
 
@@ -25,6 +25,10 @@ NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilsa
 | multer | 3 | parsing multipart/form-data |
 | uuid | 1 | génération d'identifiants uniques |
 | sysinfo | 0.30 | métriques RAM, disque, uptime (plugin_health) |
+| rumqttc | 0.24 | client MQTT pur Rust (mqtt_worker) |
+| aya | 0.12 | framework eBPF userspace (ebpf_worker) |
+| libc | 0.2 | appels système (RLIMIT_MEMLOCK pour eBPF) |
+| chrono | 0.4 | gestion des dates/timestamps |
 
 ---
 
@@ -35,16 +39,24 @@ small-folks/
 ├── README.md                        ← ce fichier
 ├── config_actions.json              ← annuaire des routes
 ├── .env                             ← variables d'environnement
+├── .env.example                     ← template des variables d'environnement
 ├── Cargo.toml                       ← workspace Rust (edition 2024 pour le binaire)
 ├── dump/
 │   └── R504TP_2026_04_23_dump       ← dump SQL de la base de démonstration
 ├── src/
 │   ├── main.rs                      ← démarrage, pools, précache plugins
 │   ├── dispatcher.rs                ← résolution routes, rendu, auth
-│   ├── app_security.rs              ← module contenant des fonctions de vérification (XSS)
-│   └── helpers_hbs.rs               ← helpers Handlebars personnalisés
+│   ├── app_security.rs              ← protections XSS, open redirect, header injection
+│   ├── helpers_hbs.rs               ← helpers Handlebars personnalisés
+│   ├── mqtt_worker.rs               ← client MQTT de fond (stockage capteurs)
+│   └── ebpf_worker.rs               ← firewall XDP userspace (optionnel, nécessite sudo)
+├── ebpf-firewall/                   ← programme XDP kernel (crate séparée, bpfel-unknown-none)
+│   ├── Cargo.toml
+│   ├── rust-toolchain.toml          ← nightly + rust-src (requis pour bpfel-unknown-none)
+│   ├── .cargo/config.toml           ← cible bpfel-unknown-none + build-std=core
+│   └── src/main.rs                  ← programme XDP : comptage SYN + DROP blacklist
 ├── plugins/                         ← tous les plugins en edition 2021
-│   ├── plugin-core/src/lib.rs       ← traits et types partagés (FFI)
+│   ├── plugin-core/src/lib.rs       ← traits, types partagés (FFI) + named_to_positional
 │   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources + form
 │   ├── plugin_mongo/src/lib.rs      ← MongoDB avec MongoContext autonome
 │   ├── plugin_auth/src/lib.rs       ← login / logout / JWT / sessions
@@ -68,6 +80,7 @@ small-folks/
 │   │   ├── nav.hbs
 │   │   └── footer.hbs
 │   └── specifics/                   ← templates spécifiques au projet
+│       ├── chart_capteurs.hbs       ← courbes Chart.js température + humidité
 │       └── form_countries.hbs
 ├── public/
 │   ├── css/styles.css               ← styles globaux + formulaires + dashboard
@@ -76,7 +89,9 @@ small-folks/
 ├── resources/                       ← logos et schémas du framework
 └── sql/
     ├── create_countries.sql
-    └── create_uploads.sql
+    ├── create_uploads.sql
+    ├── create_capteurs.sql          ← table capteurs MQTT
+    └── create_ebpf_blacklist.sql    ← table blacklist eBPF/XDP
 ```
 
 ---
@@ -122,6 +137,7 @@ HTTP response
 |---|---|---|---|
 | `plugin` | string | — | Chemin vers le `.so` |
 | `sql` | string | — | Requête SQL avec `:param` (utilisé aussi par plugin_auth) |
+| `sql_upload` | string | — | Requête INSERT pour la table uploads (plugin_sql_upload) |
 | `collection` | string | — | Collection MongoDB |
 | `filter` | string | `{}` | Filtre BSON JSON avec `:param` |
 | `operation` | string | `find` | Opération MongoDB ou auth (`login`, `logout`, `me`, `status`, `dashboard`) |
@@ -153,13 +169,10 @@ HTTP response
 
 ### Structure JSON envoyée à tableGeneric.hbs
 
-Les données sont **toujours** wrappées dans un objet par le dispatcher — `row_link` vide = falsy en Handlebars :
-
 ```json
 {
   "data": [
-    { "id": "1", "nom": "Lion", "espece": "Panthera leo" },
-    { "id": "2", "nom": "Tigre", "espece": "Panthera tigris" }
+    { "id": "1", "nom": "Lion", "espece": "Panthera leo" }
   ],
   "row_link":     "/view/animal",
   "row_link_col": 1
@@ -186,101 +199,37 @@ Sans `row_link` dans la config → `row_link: ""` → `{{#if row_link}}` est fal
   "resources": {
     "code_countries": [
       { "val": "DE", "label": "Allemagne", "selected": false },
-      { "val": "FR", "label": "France",    "selected": true  },
-      { "val": "US", "label": "États-Unis","selected": false }
+      { "val": "FR", "label": "France",    "selected": true  }
     ]
   }
 }
 ```
 
-**`selected` est pré-calculé côté Rust** dans `plugin_sql` en comparant `val` avec la valeur courante du champ. Cela évite toute remontée de contexte (`../value`) impossible en Handlebars Rust.
+**`selected` est pré-calculé côté Rust** dans `plugin_sql`.
 
 - Mode `insert_XXX` → valeurs vides → `selected: false` partout → "-- choisir --" affiché
 - Mode `update_XXX` → `selected: true` sur l'option correspondant à la valeur courante
-
-### Exemples de routes
-
-```json
-{
-    "GET/animaux": {
-        "plugin":       "./target/release/libplugin_sql.so",
-        "sql":          "SELECT CAST(id AS CHAR) AS id, nom, espece FROM animaux ORDER BY nom",
-        "view":         "generics/tableGeneric.hbs",
-        "return_type":  "html",
-        "row_link":     "/view/animal",
-        "row_link_col": 1,
-        "auth":         true
-    },
-    "GET/view/user/:id": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id_users AS CHAR) AS id, name, firstName, code_countries FROM users WHERE id_users = :id",
-        "view":        "generics/formGeneric.hbs",
-        "form_action": "/update_user/:id",
-        "form_columns": 2,
-        "form_fullwidth_fields": ["addresse1", "addresse2", "city"],
-        "return_type": "html",
-        "auth":        true,
-        "data_resources": { "code_countries": "countries" },
-        "sql_resources":  { "countries": "SELECT code, name_fr FROM countries ORDER BY name_fr" }
-    },
-    "POST/insert_user": {
-        "plugin":       "./target/release/libplugin_sql_upload.so",
-        "sql":          "INSERT INTO users (name, firstName, login, image) VALUES (:name, :firstName, :login, :image)",
-        "upload_field": "image",
-        "allowed_mime": "image/jpeg,image/png,image/webp",
-        "max_size_mb":  "5",
-        "return_type":  "redirect",
-        "redirect_to":  "/users",
-        "auth":         true
-    },
-    "POST/login": {
-        "plugin":      "./target/release/libplugin_auth.so",
-        "operation":   "login",
-        "sql":         "SELECT id_users AS id, name, firstName AS first_name, login, function, office FROM users WHERE login = :login AND mdp = :mdp LIMIT 1",
-        "return_type": "redirect",
-        "redirect_to": "/index"
-    },
-    "GET/health": {
-        "plugin":      "./target/release/libplugin_health.so",
-        "operation":   "status",
-        "return_type": "json"
-    },
-    "GET/health/dashboard": {
-        "plugin":      "./target/release/libplugin_health.so",
-        "operation":   "dashboard",
-        "view":        "generics/health_dashboard.hbs",
-        "return_type": "html",
-        "auth":        true
-    }
-}
-```
 
 ---
 
 ## plugin-core — types partagés (FFI)
 
 ```rust
-pub struct AppState {
-    pub pool:     MySqlPool,
-    pub handle:   Handle,
-    pub mongo:    Option<mongodb::Client>,
-    pub sessions: Arc<Mutex<HashMap<String, SessionUser>>>,
-}
-
 pub struct ActionContext {
     pub sql:                   String,
+    pub sql_upload:            String,        // INSERT uploads (plugin_sql_upload)
     pub collection:            String,
     pub filter:                String,
     pub operation:             String,
     pub upload_dir:            String,
-    pub upload_field:          String,        // champ fichier (plugin_sql_upload)
+    pub upload_field:          String,
     pub allowed_mime:          String,
     pub max_size_mb:           String,
     pub form_action:           Option<String>,
-    pub form_columns:          u8,            // 1 (défaut) ou 2
-    pub form_fullwidth_fields: Vec<String>,   // champs pleine largeur en mode 2 col
-    pub row_link:              Option<String>,// URL de base pour lien colonne tableGeneric
-    pub row_link_col:          u8,            // index colonne du lien (défaut 1)
+    pub form_columns:          u8,
+    pub form_fullwidth_fields: Vec<String>,
+    pub row_link:              Option<String>,
+    pub row_link_col:          u8,
     pub data_resources:        HashMap<String, String>,
     pub sql_resources:         HashMap<String, String>,
     pub params:                HashMap<String, String>,
@@ -304,65 +253,61 @@ pub trait Plugin: Send + Sync {
     fn name(&self) -> &'static str;
     fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult;
 }
+
+// Fonction partagée entre tous les plugins — évite la duplication
+pub fn named_to_positional(
+    sql:    &str,
+    params: &HashMap<String, String>,
+) -> (String, Vec<String>)
 ```
 
 ---
 
 ## Helpers Handlebars (src/helpers_hbs.rs)
 
-Les helpers Handlebars personnalisés sont regroupés dans `src/helpers_hbs.rs`, séparé de `dispatcher.rs` pour faciliter l'ajout de nouveaux helpers sans toucher au dispatcher.
+Centralisés dans `src/helpers_hbs.rs`, enregistrés via `crate::helpers_hbs::register_all(&mut hbs)`.
 
-### Enregistrement
+### Helper `compare` — bloc conditionnel
 
-```rust
-// Dans dispatcher.rs — Dispatcher::new()
-crate::helpers_hbs::register_all(&mut hbs);
-
-// Dans main.rs
-mod helpers_hbs;
-```
-
-### Ajouter un helper
-
-```rust
-// Dans helpers_hbs.rs
-pub fn register_all(hbs: &mut Handlebars) {
-    hbs.register_helper("compare", Box::new(CompareHelper));
-    hbs.register_helper("mon_helper", Box::new(MonHelper)); // ← ajouter ici
-}
-```
-
-### Helper `compare`
-
-Compare deux valeurs chaînes avec un opérateur configurable. Les helpers de blocs doivent implémenter `HelperDef` (pas une closure) pour exprimer correctement les lifetimes `'reg: 'rc` requis par `Renderable::render`.
-
-**Syntaxe :**
 ```handlebars
 {{#compare val "actif"}}vrai{{/compare}}
 {{#compare val "actif"}}vrai{{else}}faux{{/compare}}
 {{#compare role "admin"  operator="=="}}...{{/compare}}
 {{#compare nb   "10"     operator=">"}}...{{/compare}}
-{{#compare nb   "10"     operator="<="}}...{{/compare}}
-{{#compare val  "x"      operator="!="}}...{{/compare}}
 ```
 
-**Opérateurs supportés :** `==` `===` `!=` `!==` `>` `>=` `<` `<=`
+Opérateurs : `==` `===` `!=` `!==` `>` `>=` `<` `<=`
 
-Pour les opérateurs ordinaux (`>` `>=` `<` `<=`) : comparaison numérique si les deux valeurs sont des nombres, lexicographique sinon.
+### Helper `json` — injection JSON brut dans `<script>`
 
-**Pourquoi une struct et pas une closure :**
-```rust
-// ❌ Closure — impossible d'exprimer 'reg: 'rc
-|h: &Helper, hbs: &Handlebars, ...| -> HelperResult { t.render(...) }
-
-// ✅ Struct avec HelperDef — lifetimes explicites
-impl HelperDef for CompareHelper {
-    fn call<'reg: 'rc, 'rc>(&self, h: &Helper<'rc>,
-        hbs: &'reg Handlebars<'reg>, ...) -> HelperResult {
-        t.render(hbs, ctx, rc, out)  // OK
-    }
-}
+```handlebars
+{{!-- Triple accolades = pas d'échappement HTML → JSON valide pour JS --}}
+<script>
+  const data = {{{json data}}};
+  const labels = data.map(r => r.timestamp);
+</script>
 ```
+
+### Helpers natifs Handlebars Rust (ne pas réenregistrer)
+
+`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `not` — disponibles en subexpression :
+```handlebars
+{{#if (eq status "ok")}}...{{/if}}
+{{#if (gt memory.usage_percent 85)}}...{{/if}}
+```
+
+---
+
+## Sécurité (src/app_security.rs)
+
+| Fonction | Protège contre | Exemple |
+|---|---|---|
+| `sanitize_redirect(url)` | Open Redirect | `http://evil.com` → `/` |
+| `sanitize_header(val)` | Header Splitting | `val\r\nX-Evil:` → `valX-Evil:` |
+| `sanitize_log(msg)` | Log Injection | `msg\n[FAKE]` → `msg [FAKE]` |
+| `sanitize_html(input)` | XSS hors-template | `<script>` → `&lt;script&gt;` |
+
+Tests unitaires : `cargo test -p small-folks`
 
 ---
 
@@ -373,7 +318,7 @@ impl HelperDef for CompareHelper {
 Cargo.toml principal (binaire small-folks) → edition = "2024"
 Cargo.toml des plugins (cdylib)            → edition = "2021"
 ```
-En edition 2024, `#[no_mangle]` devient `#[unsafe(no_mangle)]`. Les plugins restent en 2021 pour éviter cette contrainte.
+En edition 2024, `#[no_mangle]` devient `#[unsafe(no_mangle)]`. Les plugins restent en 2021.
 
 ### plugin_sql — block_in_place + handle.block_on
 ```rust
@@ -388,116 +333,33 @@ tokio::task::block_in_place(|| {
 Le client MongoDB DOIT être créé dans `MONGO_RT`, pas dans `main.rs`.
 Sinon `block_in_place` de `plugin_sql` affame le heartbeat MongoDB → latence 1-8s.
 
-```rust
-struct MongoContext { rt: Runtime, client: mongodb::Client }
-static MONGO_CTX: OnceLock<MongoContext> = OnceLock::new();
-
-tokio::task::block_in_place(|| {
-    get_mongo_ctx().rt.block_on(async move { ... })
-})
-```
-
 **La même règle s'applique à `plugin_health`** (`HealthContext` + `HEALTH_RT`) et à **`plugin_sql_upload`** (`OnceLock<Runtime>` dédié).
 
-### Règles SQL
-- Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(COUNT(*) AS CHAR)`, `CAST(id AS CHAR)`, `CAST(created_at AS CHAR)`
-- Paramètres nommés `:param` convertis automatiquement en `?` positionnels
-- `plugin_auth` utilise aussi `ctx.sql` — la requête est définie dans `config_actions.json`
-
-### Cookies multiples avec Tide
+### named_to_positional — fonction partagée dans plugin-core
 ```rust
-// ❌ .header() deux fois → le second écrase le premier
-// ✅ insert_header() puis append_header()
-res.insert_header("Set-Cookie", "session_id=...; HttpOnly");
-res.append_header("Set-Cookie", "jwt_token=...");
+// Dans tous les plugins qui exécutent du SQL :
+let (sql_prepared, values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
 ```
+Ne pas dupliquer — `regex = "1"` dans `plugin-core/Cargo.toml` suffit.
+
+### Règles SQL
+- Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(id AS CHAR)`, `CAST(COUNT(*) AS CHAR)`
+- Paramètres nommés `:param` → convertis automatiquement en `?` positionnels
+- `plugin_auth` utilise `ctx.sql` — requête définie dans `config_actions.json`
 
 ### Templates Handlebars Rust
 - `{{this}}` et non `{{.}}`
-- `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers de `tableGeneric`
+- `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers
 - `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{#if fullwidth}}` pour `formGeneric`
-- `{{#each (lookup @root.resources key)}}` + `{{val}}`, `{{label}}`, `{{#if selected}}` pour les options select
-- `{{#if row_link}}` fonctionne car `row_link` vaut `""` (falsy) quand absent
-- `../../../@key` est interdit — Handlebars Rust ne supporte pas la remontée profonde
-- Partials : `{{> partials/header page_title="Titre"}}`
-- **Formulaire avec upload** : `enctype="multipart/form-data"` obligatoire (guillemet fermant !)
-
----
-
-## Formulaire générique — mode 2 colonnes + selects
-
-### Colonnes CSS Grid
-
-`plugin_sql` enrichit chaque champ avec un flag `fullwidth: bool` calculé depuis `form_fullwidth_fields` :
-
-```
-config_actions.json          plugin_sql                   formGeneric.hbs
-─────────────────────        ──────────────               ───────────────────────
-form_columns: 2          →   data[0].fields = [       →   {{#each data.0.fields}}
-form_fullwidth_fields:         {key:"name",    fw:false}     {{#if fullwidth}} ← class
-  ["addresse1","city"]         {key:"addresse1",fw:true }    {{/if}}
-                               {key:"city",    fw:true }   {{/each}}
-                             ]
-```
-
-```css
-.form-2col { grid-template-columns: 1fr 1fr; }
-.form-2col .form-group-full { grid-column: 1 / -1; }
-@media (max-width: 640px) { .form-2col { grid-template-columns: 1fr; } }
-```
-
-### Selects avec valeur pré-sélectionnée
-
-`plugin_sql` pré-calcule `selected: bool` sur chaque option en comparant `val` avec la valeur courante du champ. Cela évite toute remontée de contexte impossible en Handlebars Rust :
-
-```
-plugin_sql                               formGeneric.hbs
-──────────────────────────────           ────────────────────────────────────
-current_value = data[0]["code_countries"]  {{#each (lookup @root.resources key)}}
-= "FR"                                     <option value="{{val}}"
-                                             {{#if selected}}selected{{/if}}>
-resources["code_countries"] = [              {{label}}
-  {val:"DE", label:"Allemagne", sel:false}  </option>
-  {val:"FR", label:"France",    sel:true }  {{/each}}
-  {val:"US", label:"États-Unis",sel:false}
-]
-```
-
-| Mode form_action | Valeurs data | selected | Résultat |
-|---|---|---|---|
-| `insert_XXX` | `""` (vides) | `false` partout | "-- choisir --" affiché |
-| `update_XXX` | `"FR"`, `"admin"`... | `true` sur la valeur courante | option pré-sélectionnée |
-
----
-
-## Tableau générique avec lien (tableGeneric + row_link)
-
-Quand `row_link` est défini dans `config_actions.json`, DataTables génère automatiquement un lien sur la colonne `row_link_col` :
-
-```json
-"GET/animaux": {
-    "plugin":       "./target/release/libplugin_sql.so",
-    "sql":          "SELECT CAST(id AS CHAR) AS id, nom, espece FROM animaux",
-    "view":         "generics/tableGeneric.hbs",
-    "return_type":  "html",
-    "row_link":     "/view/animal",
-    "row_link_col": 1
-}
-```
-
-Le lien est construit comme `row_link + "/" + data` → `/view/animal/Lion`.
-
-Sans `row_link` → `row_link: ""` dans le JSON → `{{#if row_link}}` est falsy → tableau standard sans lien. Les données sont **toujours** wrappées dans `{ data, row_link, row_link_col }` par le dispatcher.
+- `{{#each (lookup @root.resources key)}}` + `{{val}}`, `{{label}}`, `{{#if selected}}` pour les selects
+- `../../../@key` interdit — Handlebars Rust ne supporte pas la remontée profonde
+- `enctype="multipart/form-data"` obligatoire sur les formulaires upload (guillemet fermant !)
 
 ---
 
 ## Authentification (plugin_auth)
 
-### Principe — SQL dans la config
-
-La requête de vérification est définie dans `config_actions.json`. Le plugin mappe les colonnes via leurs alias SQL.
-
-### Convention d'alias
+### Convention d'alias SQL
 
 | Alias recommandé | Fallbacks | Rôle |
 |---|---|---|
@@ -520,60 +382,42 @@ La requête de vérification est définie dans `config_actions.json`. Le plugin 
 }
 ```
 
-Table avec email comme identifiant et condition `actif` :
+> **⚠️ Mots de passe bcrypt** : la comparaison SQL directe ne fonctionne pas avec `password_hash()`.
+
+---
+
+## Upload de fichiers
+
+### plugin_upload — upload autonome
+
 ```json
-"POST/login": {
-    "plugin":    "./target/release/libplugin_auth.so",
-    "operation": "login",
-    "sql":       "SELECT id_utilisateur AS id, nom AS name, prenom AS first_name, email AS login, role AS function, '' AS office FROM utilisateur WHERE email = :login AND mot_de_passe = :mdp AND actif = 1 LIMIT 1",
-    "return_type": "redirect",
-    "redirect_to": "/index"
+"POST/upload": {
+    "plugin":       "./target/release/libplugin_upload.so",
+    "sql":          "INSERT INTO uploads (uuid, filename, stored_as, mime_type, size_bytes, upload_dir) VALUES (:uuid, :filename, :stored_as, :mime_type, :size_bytes, :upload_dir)",
+    "allowed_mime": "image/jpeg,image/png,application/pdf",
+    "max_size_mb":  "10",
+    "return_type":  "redirect",
+    "redirect_to":  "/uploads"
 }
 ```
 
-> **⚠️ Mots de passe bcrypt** : la comparaison SQL directe ne fonctionne pas avec `password_hash()`. Il faut modifier `plugin_auth` pour vérifier avec la crate `bcrypt` côté Rust.
+### plugin_sql_upload — upload + SQL métier
 
-### Opérations plugin_auth
-
-| Opération | Route | Description |
-|---|---|---|
-| `login` | `POST /login` | Exécute `ctx.sql`, crée session + JWT |
-| `logout` | `GET /logout` | Supprime la session du cache |
-| `me` | `GET /api/me` | Retourne les infos de l'utilisateur courant (JSON) |
-
-### Protection d'une route
 ```json
-"GET/ma-route": { "auth": true, ... }
-```
-- Non authentifié + `return_type: json` → HTTP 401
-- Non authentifié + `return_type: html` → redirect `/login?next=/ma-route`
-
----
-
-## Upload de fichiers (plugin_upload)
-
-Upload autonome sans SQL métier — stocke fichier + métadonnées dans `uploads`.
-
----
-
-## Upload + SQL métier (plugin_sql_upload)
-
-### Flux
-```
-POST /insert_user (multipart/form-data)
-  ├─ 1. Parse multipart → champs texte dans params
-  ├─ 2. Validation MIME + taille
-  ├─ 3. UUID.ext → écriture disque
-  ├─ 4. INSERT INTO uploads
-  ├─ 5. params[upload_field] = "uuid.ext"
-  ├─ 6. Exécution SQL métier
-  └─ redirect ou json
+"POST/insert_user": {
+    "plugin":       "./target/release/libplugin_sql_upload.so",
+    "sql":          "INSERT INTO users (name, image) VALUES (:name, :image)",
+    "sql_upload":   "INSERT INTO uploads (uuid, filename, stored_as, mime_type, size_bytes, upload_dir) VALUES (:uuid, :filename, :stored_as, :mime_type, :size_bytes, :upload_dir)",
+    "upload_field": "image",
+    "allowed_mime": "image/jpeg,image/png,image/webp",
+    "max_size_mb":  "5",
+    "return_type":  "redirect",
+    "redirect_to":  "/users",
+    "auth":         true
+}
 ```
 
-Si aucun fichier → `params[upload_field] = ""` → SQL reçoit `NULL`.
-Erreur SQL → fichier supprimé du disque (rollback partiel).
-
-### Astuce UPDATE avec photo optionnelle
+Astuce UPDATE photo optionnelle :
 ```sql
 UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:id
 ```
@@ -587,40 +431,166 @@ GET /health              → JSON brut
 GET /health/dashboard    → HTML dashboard (auth: true conseillé)
 ```
 
-```json
-{
-  "status": "ok",
-  "sessions":  { "active": 2, "expired": 0, "total": 2 },
-  "databases": {
-    "mysql":   { "status": "ok", "latency_ms": 1 },
-    "mongodb": { "status": "ok", "latency_ms": 3 }
-  },
-  "memory":  { "total_mb": 16000, "used_mb": 8000, "free_mb": 8000, "usage_percent": 50 },
-  "disk":    { "mount": "/", "total_gb": 500, "used_gb": 120, "free_gb": 380, "usage_percent": 24 },
-  "uptime":  { "seconds": 3600, "formatted": "1h 0min" }
-}
-```
-
 `plugin_health` utilise `HealthContext` avec `HEALTH_RT` autonome — même pattern que `plugin_mongo`.
 
 ---
 
-## Table MySQL uploads
+## Client MQTT (mqtt_worker)
+
+Tâche Tokio de fond démarrée automatiquement si `MQTT_BROKER_URL` est défini dans `.env`.
+
+### Formats de messages supportés
+
+- `sensors/temperature` → payload float : `"25.3"`
+- `sensors/humidity` → payload float : `"60.5"`
+- `sensors/+/data` → payload JSON : `{"sensor_id":"DHT22-001","temperature":25.3,"humidity":60.5}`
+
+Les topics `temperature`/`humidity` sont mis en buffer par `sensor_id`. L'INSERT a lieu quand les deux valeurs sont disponibles.
+
+### Table MySQL capteurs
 
 ```sql
-CREATE TABLE IF NOT EXISTS uploads (
+CREATE TABLE IF NOT EXISTS capteurs (
     id          INT AUTO_INCREMENT PRIMARY KEY,
-    uuid        CHAR(36)     NOT NULL UNIQUE,
-    filename    VARCHAR(255) NOT NULL,
-    stored_as   VARCHAR(255) NOT NULL,
-    mime_type   VARCHAR(100) NOT NULL,
-    size_bytes  BIGINT       NOT NULL,
-    upload_dir  VARCHAR(255) NOT NULL,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    sensor_id   VARCHAR(50) NOT NULL,
+    temperature FLOAT       NOT NULL,
+    humidity    FLOAT       NOT NULL,
+    timestamp   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_sensor_id (sensor_id),
+    INDEX idx_timestamp (timestamp)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ```
 
-Dump de la base de démonstration dans `./dump/`.
+### Routes suggérées
+
+```json
+"GET/capteurs": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs ORDER BY timestamp DESC LIMIT 100",
+    "view": "generics/tableGeneric.hbs",
+    "return_type": "html",
+    "auth": true
+},
+"GET/capteurs/chart": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs ORDER BY timestamp DESC LIMIT 200",
+    "view": "specifics/chart_capteurs.hbs",
+    "return_type": "html",
+    "auth": true
+}
+```
+
+---
+
+## Firewall eBPF/XDP (ebpf_worker)
+
+Filtre les paquets réseau **dans le kernel Linux** avant la stack TCP/IP — protection contre les attaques SYN flood.
+
+### Architecture
+
+```
+Paquet réseau entrant (NIC)
+  ↓
+[xdp_firewall] ← tourne dans le kernel (bpfel-unknown-none)
+  ├─ IP dans BLACKLIST ?       → XDP_DROP (~100ns)
+  ├─ Paquet TCP SYN ?          → incrémenter CONN_COUNT[src_ip]
+  │   └─ count > rate_limit ?  → BLACKLIST[src_ip] = now → XDP_DROP
+  └─ Sinon                     → XDP_PASS
+         ↕ BPF Maps (mémoire partagée kernel ↔ userspace)
+[ebpf_worker] ← tourne en userspace (Tokio, toutes les 5s)
+  ├─ Lit STATS  → logs
+  ├─ Sync BLACKLIST → MySQL (ebpf_blacklist)
+  └─ Auto-débloque les IPs expirées
+```
+
+### BPF Maps
+
+| Map | Type | Rôle |
+|---|---|---|
+| `CONN_COUNT` | `HashMap<u32, u32>` | Compteur SYN par IP |
+| `CONN_FIRST` | `HashMap<u32, u64>` | Timestamp premier SYN par IP |
+| `BLACKLIST` | `HashMap<u32, u64>` | IPs bloquées + timestamp |
+| `CONFIG` | `Array<u64>` | `[rate_limit, window_ns]` |
+| `STATS` | `Array<u64>` | `[paquets, drops, syn]` |
+
+### Compilation du programme kernel
+
+```bash
+# Prérequis
+rustup component add rust-src
+cargo install bpf-linker
+
+# Compiler le programme kernel (depuis ebpf-firewall/)
+cd ebpf-firewall
+cargo build --release
+# → target/bpfel-unknown-none/release/ebpf-firewall
+```
+
+Le dossier `ebpf-firewall/` est **exclu du workspace principal** car il utilise la cible `bpfel-unknown-none`. Il contient son propre `[workspace]` dans son `Cargo.toml` et un `rust-toolchain.toml` qui force nightly.
+
+### Activation dans small-folks
+
+```toml
+# Cargo.toml — décommenter
+aya = { version = "0.12", features = ["async_tokio"] }
+```
+
+```rust
+// src/main.rs — décommenter
+mod ebpf_worker;
+// + le bloc if EBPF_ENABLED
+```
+
+```bash
+# .env
+EBPF_ENABLED=true
+EBPF_INTERFACE=eth0
+EBPF_PROGRAM=./ebpf-firewall/target/bpfel-unknown-none/release/ebpf-firewall
+EBPF_RATE_LIMIT=100
+EBPF_WINDOW_SECS=60
+EBPF_AUTO_UNBLOCK_SECS=300
+
+# Lancer avec les droits nécessaires
+sudo ./target/release/small-folks
+# ou
+sudo setcap cap_bpf,cap_net_admin+eip ./target/release/small-folks
+./target/release/small-folks
+```
+
+### Table MySQL ebpf_blacklist
+
+```sql
+CREATE TABLE IF NOT EXISTS ebpf_blacklist (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    ip_address   VARCHAR(15)  NOT NULL,
+    blocked_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    unblock_at   DATETIME     DEFAULT NULL,
+    unblocked_at DATETIME     DEFAULT NULL,
+    reason       VARCHAR(100) NOT NULL DEFAULT 'rate_limit_exceeded',
+    UNIQUE KEY uq_ip_active (ip_address, unblocked_at),
+    INDEX idx_ip (ip_address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```
+
+### Routes suggérées
+
+```json
+"GET/security/blacklist": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT ip_address, CAST(blocked_at AS CHAR) AS blocked_at, reason, CAST(unblock_at AS CHAR) AS unblock_at FROM ebpf_blacklist WHERE unblocked_at IS NULL ORDER BY blocked_at DESC",
+    "view": "generics/tableGeneric.hbs",
+    "return_type": "html",
+    "auth": true
+}
+```
+
+### Performances observées
+
+```
+~19 000 paquets droppés/seconde dans le kernel
+99.6% des paquets bloqués pendant un flood SYN
+Tide / MySQL : aucun impact pendant l'attaque
+```
 
 ---
 
@@ -641,6 +611,21 @@ UPLOAD_DIR=./uploads
 JWT_SECRET=chaine-secrete-32-chars-minimum
 SESSION_TTL_SECONDS=3600
 LOGIN_REDIRECT=/index
+
+# MQTT (optionnel)
+# MQTT_BROKER_URL=localhost
+# MQTT_BROKER_PORT=1883
+# MQTT_CLIENT_ID=small-folks-mqtt
+# MQTT_TOPICS=sensors/#
+# MQTT_QOS=1
+
+# eBPF Firewall XDP (optionnel — nécessite sudo ou CAP_BPF + kernel ≥ 5.8)
+# EBPF_ENABLED=true
+# EBPF_INTERFACE=eth0
+# EBPF_PROGRAM=./ebpf-firewall/target/bpfel-unknown-none/release/ebpf-firewall
+# EBPF_RATE_LIMIT=100
+# EBPF_WINDOW_SECS=60
+# EBPF_AUTO_UNBLOCK_SECS=300
 ```
 
 ---
@@ -648,8 +633,17 @@ LOGIN_REDIRECT=/index
 ## Compilation et lancement
 
 ```bash
+# Compiler tous les plugins + le binaire
 cargo build --release --all
+
+# (Optionnel) Compiler le programme eBPF kernel
+cd ebpf-firewall && cargo build --release && cd ..
+
+# Lancer (sans eBPF)
 ./target/release/small-folks
+
+# Lancer (avec eBPF)
+sudo ./target/release/small-folks
 ```
 
 Les `.so` dans `config_actions.json` doivent pointer vers `./target/release/`.
@@ -659,7 +653,7 @@ Mélanger binaire release et `.so` debug provoque un coredump.
 
 ## Performances (release, localhost)
 
-| Plugin | Opération | Latence |
+| Composant | Opération | Latence / Débit |
 |---|---|---|
 | plugin_sql | SELECT 243 lignes | 1-5ms |
 | plugin_mongo | find 243 documents | 3-5ms |
@@ -667,6 +661,9 @@ Mélanger binaire release et `.so` debug provoque un coredump.
 | plugin_upload | upload 1 fichier | < 10ms |
 | plugin_sql_upload | upload + INSERT SQL | < 15ms |
 | plugin_health | toutes métriques + pings | < 10ms |
+| mqtt_worker | INSERT capteur | < 5ms |
+| ebpf_worker (XDP) | DROP paquet blacklisté | ~100ns |
+| ebpf_worker (XDP) | Débit observé en test | ~19 000 drops/s |
 
 ---
 
