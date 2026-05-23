@@ -1,4 +1,4 @@
-# small-folks — Framework MVC Rust piloté par configuration
+# small-folks — Framework MVC Rust piloté par configuration ([english version](https://github.com/Stephanux/small-folks/blob/main/README_EN.md))
 
 <p align="center">
   <img src="https://mascaron.net/logo_small-folks-v1.png" alt="Logo Rust Framework small-Folks" />
