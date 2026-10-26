@@ -316,6 +316,51 @@ impl Dispatcher {
                     // Les Objects custom (health_dashboard, etc.) passent INTACTS
                     // → {{status}}, {{sessions.active}} etc. fonctionnent directement.
                     let data = match data {
+                        // Déjà enrichi par plugin_sql (data_resources non vide) → intact
+                        serde_json::Value::Object(ref m) if m.contains_key("data") => data,
+
+                        // Array + form_action → formulaire sans ressources : on construit fields
+                        serde_json::Value::Array(ref arr) if ctx.form_action.is_some() => {
+                            let fullwidth_set: std::collections::HashSet<&String> =
+                                ctx.form_fullwidth_fields.iter().collect();
+                            let data_with_meta: Vec<serde_json::Value> = arr.iter()
+                                .map(|row| {
+                                    if let serde_json::Value::Object(obj) = row {
+                                        let fields: Vec<serde_json::Value> = obj.iter()
+                                            .map(|(k, v)| serde_json::json!({
+                                                "key":       k,
+                                                "value":     v,
+                                                "fullwidth": fullwidth_set.contains(k),
+                                            }))
+                                            .collect();
+                                        serde_json::json!({ "fields": fields })
+                                    } else { row.clone() }
+                                })
+                                .collect();
+                            let mut w = serde_json::Map::new();
+                            w.insert("data".into(), serde_json::Value::Array(data_with_meta));
+                            w.insert("form_action".into(),
+                                serde_json::Value::String(ctx.form_action.clone().unwrap_or_default()));
+                            w.insert("form_columns".into(),
+                                serde_json::Value::Number(ctx.form_columns.into()));
+                            serde_json::Value::Object(w)
+                        }
+
+                        // Array sans form_action → tableau avec row_link
+                        serde_json::Value::Array(_) => {
+                            let mut w = serde_json::Map::new();
+                            w.insert("row_link".into(),
+                                serde_json::Value::String(ctx.row_link.clone().unwrap_or_default()));
+                            w.insert("row_link_col".into(),
+                                serde_json::Value::Number(ctx.row_link_col.into()));
+                            w.insert("data".into(), data);
+                            serde_json::Value::Object(w)
+                        }
+
+                        // Object custom (health, auth...) → intact
+                        other => other,
+                    };
+                    /*let data = match data {
                         // Array SQL → wrapper avec row_link pour tableGeneric
                         serde_json::Value::Array(_) => {
                             let mut w = serde_json::Map::new();
@@ -332,11 +377,13 @@ impl Dispatcher {
                         serde_json::Value::Object(ref m) if m.contains_key("data") => data,
                         // Object custom (health_dashboard, auth...) → intact
                         other => other,
-                    };
+                    };*/
                     
+
+
                     // Injecter form_action + form_columns + form_fullwidth_fields
                     // si défini et que les données ne sont pas déjà enrichies par plugin_sql
-                    let data = if let Some(fa) = &ctx.form_action {
+                    /*let data = if let Some(fa) = &ctx.form_action {
                         match &data {
                             serde_json::Value::Object(map) if map.contains_key("data") => data,
                             serde_json::Value::Array(arr) => {
@@ -368,7 +415,7 @@ impl Dispatcher {
                         }
                     } else {
                         data
-                    };
+                    };*/
 
                     match self.hbs.render(view_name, &data) {
                         Ok(html) => Ok(Response::builder(200)

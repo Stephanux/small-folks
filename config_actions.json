@@ -315,5 +315,54 @@
         "view":        "specifics/chart_capteurs.hbs",
         "return_type": "html",
         "auth":        true
+    },
+
+    "GET/view/ia_datasets": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets ORDER BY name, version",
+        "view":        "generics/tableGeneric.hbs",
+        "return_type": "html"
+    },
+    "GET/api/ia_datasets": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets ORDER BY name, version",
+        "return_type": "json"
+    },
+    "GET/view/ia_datasets/add": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "view":        "generics/formGeneric.hbs",
+        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets LIMIT 1",
+        "form_action": "/insert_ia_dataset",
+        "form_columns": 2,
+        "form_fullwidth_fields" : ["file_path"],
+        "return_type": "html",
+        "data_resources": {},
+        "sql_resources": {}
+    },
+    "POST/add_ia_dataset": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "INSERT INTO ia_datasets (name, version, file_path) VALUES (:name, :version, :file_path)",
+        "return_type": "html",
+        "redirect_to": "/view/ia_datasets"
+    },
+    "GET/view/ia_datasets/:id/edit": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets WHERE id = :id",
+        "view":        "generics/formGeneric.hbs",
+        "form_action": "/update_ia_dataset",
+        "form_columns": 2,
+        "return_type": "html"
+    },
+    "POST/update_ia_dataset": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "UPDATE ia_datasets SET name = :name, version = :version, file_path = :file_path WHERE id = :id",
+        "return_type": "redirect",
+        "redirect_to": "/view/ia_datasets"
+    },
+    "GET/delete_ia_dataset/:id": {
+        "plugin":      "./target/release/libplugin_sql.so",
+        "sql":         "DELETE FROM ia_datasets WHERE id = :id",
+        "return_type": "json"
     }
+
 }

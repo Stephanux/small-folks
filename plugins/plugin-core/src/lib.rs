@@ -1,3 +1,6 @@
+
+/* plugin_core : fichier de définition des types de données et des données nécessaires au chargement d'un plugin. 
+notament : sessionUser, Appstate, ActionContext, PluginResult,  */
 use sqlx::MySqlPool;
 use tokio::runtime::Handle;
 use std::collections::HashMap;
