@@ -148,6 +148,8 @@ HTTP response
 | `sql_resources` | objet | `{}` | `"nom_ressource" → "SELECT ..."` |
 | `row_link` | string | — | URL de base pour le lien sur une colonne de `tableGeneric` (ex: `/view/animal`) |
 | `row_link_col` | number | `1` | Index de la colonne qui porte le lien (défaut : colonne 1) |
+| `fields_meta` | objet | `{}` | Métadonnées d'affichage par colonne SQL : `label`, `type`, `fullwidth`, `readonly`, `options` |
+| `fields` | array | `[]` | Formulaire sans plugin ni SQL : liste **ordonnée** de champs (`name` + mêmes clés que `fields_meta` + `value`) |
 | `upload_field` | string | — | Nom du champ fichier dans le formulaire (plugin_sql_upload) |
 | `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Types MIME upload |
 | `max_size_mb` | string | `10` | Taille max upload en Mo |
@@ -209,6 +211,85 @@ Sans `row_link` dans la config → `row_link: ""` → `{{#if row_link}}` est fal
 
 - Mode `insert_XXX` → valeurs vides → `selected: false` partout → "-- choisir --" affiché
 - Mode `update_XXX` → `selected: true` sur l'option correspondant à la valeur courante
+
+---
+
+## Formulaires pilotés par la config : `fields_meta` et `fields`
+
+Deux clés optionnelles décrivent l'affichage des champs de `formGeneric.hbs` sans toucher au Rust ni au template.
+
+### Clés d'un champ
+
+| Clé | Défaut | Description |
+|---|---|---|
+| `label` | nom de la colonne | Texte affiché devant le champ |
+| `type` | `text` | `text`, `number`, `date`, `email`, `password`, `textarea`, `file` |
+| `fullwidth` | `false` | Pleine largeur en mode 2 colonnes |
+| `readonly` | `false` | Lecture seule (un select est rendu `disabled` : sa valeur n'est pas envoyée) |
+| `options` | — | Select statique : `[{ "val": "csv", "label": "CSV" }, ...]` |
+| `value` | `""` | Valeur initiale (clé `fields` uniquement) |
+
+### Variante 1 — `fields_meta` : le SQL fournit les valeurs
+
+Le SQL donne les colonnes et les valeurs, `fields_meta` ne décrit que l'affichage. Les colonnes absentes de `fields_meta` gardent leur nom comme label et le type `text`. Fonctionne en création (valeurs vides) comme en modification.
+
+```json
+"GET/view/ia_dataset/:id": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT name, version, format, nb_examples FROM ia_datasets WHERE id = :id",
+    "view": "generics/formGeneric.hbs",
+    "form_action": "/update_ia_dataset",
+    "form_columns": 2,
+    "return_type": "html",
+    "fields_meta": {
+        "name":        { "label": "Nom du dataset" },
+        "format":      { "label": "Format", "options": [
+                          { "val": "csv", "label": "CSV" }, { "val": "jsonl", "label": "JSONL" } ] },
+        "nb_examples": { "label": "Nombre d'exemples", "type": "number" }
+    }
+}
+```
+
+Si un champ est déjà défini par `data_resources`, le select SQL est prioritaire sur `options`.
+
+### Variante 2 — `fields` : formulaire sans plugin ni base
+
+Sans clé `plugin` ni `sql`, le dispatcher construit le formulaire lui-même. `fields` est un tableau, donc l'ordre d'affichage est garanti. `form_action` est obligatoire.
+
+```json
+"GET/view/ia_datasets/add": {
+    "view": "generics/formGeneric.hbs",
+    "return_type": "html",
+    "form_action": "/insert_ia_dataset",
+    "form_columns": 2,
+    "fields": [
+        { "name": "name",        "label": "Nom du dataset" },
+        { "name": "format",      "label": "Format", "options": [
+                                   { "val": "csv", "label": "CSV" }, { "val": "jsonl", "label": "JSONL" } ] },
+        { "name": "nb_examples", "label": "Nombre d'exemples", "type": "number" },
+        { "name": "description", "label": "Description", "type": "textarea", "fullwidth": true }
+    ]
+}
+```
+
+La route `POST` associée reste une action `plugin_sql` classique :
+
+```json
+"POST/insert_ia_dataset": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "INSERT INTO ia_datasets (name, format, nb_examples, description) VALUES (:name, :format, NULLIF(:nb_examples,''), :description)",
+    "return_type": "redirect",
+    "redirect_to": "/view/ia_datasets"
+}
+```
+
+### Points d'attention
+
+- En mode `insert_XXX`, le script de `formGeneric.hbs` vide les champs texte : une `value` par défaut y est effacée.
+- Un champ `file` demande `enctype="multipart/form-data"` et une route `plugin_sql_upload`.
+- Serde ignore silencieusement les clés inconnues : une faute (`field` au lieu de `fields`) ne produit aucune erreur.
+- Toute modification de `dispatcher.rs` exige `cargo build --release --all` puis un redémarrage ; `config_actions.json` et les `.hbs` ne demandent qu'un redémarrage.
+- Pour conserver l'ordre des colonnes SQL dans `fields_meta`, activer `serde_json = { version = "1", features = ["preserve_order"] }`.
 
 ---
 

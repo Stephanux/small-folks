@@ -149,6 +149,8 @@ HTTP response
 | `sql_resources` | object | `{}` | `"resource_name" → "SELECT ..."` |
 | `row_link` | string | — | Base URL for link on a `tableGeneric` column (e.g. `/view/animal`) |
 | `row_link_col` | number | `1` | Column index carrying the link (default: column 1) |
+| `fields_meta` | object | `{}` | Per-column display metadata for SQL results: `label`, `type`, `fullwidth`, `readonly`, `options` |
+| `fields` | array | `[]` | Plugin-less, SQL-less form: **ordered** list of fields (`name` + same keys as `fields_meta` + `value`) |
 | `upload_field` | string | — | File field name in the form (plugin_sql_upload) |
 | `allowed_mime` | string | `image/jpeg,image/png,application/pdf` | Allowed MIME types for upload |
 | `max_size_mb` | string | `10` | Maximum upload size in MB |
@@ -211,6 +213,85 @@ Without `row_link` in config → `row_link: ""` → `{{#if row_link}}` is falsy 
 
 - `insert_XXX` mode → empty values → `selected: false` everywhere → "-- choose --" displayed
 - `update_XXX` mode → `selected: true` on the option matching the current value
+
+---
+
+## Config-driven forms: `fields_meta` and `fields`
+
+Two optional keys describe how `formGeneric.hbs` displays fields, with no Rust or template changes.
+
+### Field keys
+
+| Key | Default | Description |
+|---|---|---|
+| `label` | column name | Text shown next to the field |
+| `type` | `text` | `text`, `number`, `date`, `email`, `password`, `textarea`, `file` |
+| `fullwidth` | `false` | Full width in 2-column mode |
+| `readonly` | `false` | Read-only (a select is rendered `disabled`: its value is not submitted) |
+| `options` | — | Static select: `[{ "val": "csv", "label": "CSV" }, ...]` |
+| `value` | `""` | Initial value (`fields` key only) |
+
+### Variant 1 — `fields_meta`: SQL provides the values
+
+SQL supplies columns and values; `fields_meta` only describes the display. Columns missing from `fields_meta` keep their name as label and type `text`. Works for create (empty values) and edit forms.
+
+```json
+"GET/view/ia_dataset/:id": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT name, version, format, nb_examples FROM ia_datasets WHERE id = :id",
+    "view": "generics/formGeneric.hbs",
+    "form_action": "/update_ia_dataset",
+    "form_columns": 2,
+    "return_type": "html",
+    "fields_meta": {
+        "name":        { "label": "Dataset name" },
+        "format":      { "label": "Format", "options": [
+                          { "val": "csv", "label": "CSV" }, { "val": "jsonl", "label": "JSONL" } ] },
+        "nb_examples": { "label": "Number of examples", "type": "number" }
+    }
+}
+```
+
+If a field is already defined by `data_resources`, the SQL select takes priority over `options`.
+
+### Variant 2 — `fields`: form without plugin or database
+
+With no `plugin` or `sql` key, the dispatcher builds the form itself. `fields` is an array, so display order is guaranteed. `form_action` is required.
+
+```json
+"GET/view/ia_datasets/add": {
+    "view": "generics/formGeneric.hbs",
+    "return_type": "html",
+    "form_action": "/insert_ia_dataset",
+    "form_columns": 2,
+    "fields": [
+        { "name": "name",        "label": "Dataset name" },
+        { "name": "format",      "label": "Format", "options": [
+                                   { "val": "csv", "label": "CSV" }, { "val": "jsonl", "label": "JSONL" } ] },
+        { "name": "nb_examples", "label": "Number of examples", "type": "number" },
+        { "name": "description", "label": "Description", "type": "textarea", "fullwidth": true }
+    ]
+}
+```
+
+The matching `POST` route stays a regular `plugin_sql` action:
+
+```json
+"POST/insert_ia_dataset": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "INSERT INTO ia_datasets (name, format, nb_examples, description) VALUES (:name, :format, NULLIF(:nb_examples,''), :description)",
+    "return_type": "redirect",
+    "redirect_to": "/view/ia_datasets"
+}
+```
+
+### Gotchas
+
+- In `insert_XXX` mode, the `formGeneric.hbs` script clears text inputs: a default `value` is wiped there.
+- A `file` field needs `enctype="multipart/form-data"` and a `plugin_sql_upload` route.
+- Serde silently ignores unknown keys: a typo (`field` instead of `fields`) raises no error.
+- Any change to `dispatcher.rs` requires `cargo build --release --all` and a restart; `config_actions.json` and `.hbs` files only need a restart.
+- To keep SQL column order in `fields_meta`, enable `serde_json = { version = "1", features = ["preserve_order"] }`.
 
 ---
 

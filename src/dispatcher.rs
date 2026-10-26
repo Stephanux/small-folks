@@ -10,6 +10,31 @@ use tide::{Request, Response};
 fn default_form_columns() -> u8 { 1 }
 fn default_row_link_col() -> u8 { 1 }
 
+/// Option statique d'un select déclaré dans fields_meta
+#[derive(Debug, Deserialize, Clone)]
+pub struct FieldOption { pub val: String, pub label: String }
+
+/// Métadonnées d'affichage d'un champ de formulaire (clé `fields_meta`)
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct FieldMeta {
+    pub label: Option<String>,
+    /// text | number | date | email | password | textarea | file
+    #[serde(default, rename = "type")]
+    pub input_type: Option<String>,
+    #[serde(default)] pub fullwidth: bool,
+    #[serde(default)] pub readonly:  bool,
+    /// Select statique (prioritaire seulement si data_resources ne définit pas le champ)
+    #[serde(default)] pub options: Vec<FieldOption>,
+}
+
+/// Champ déclaré directement dans la config (formulaire sans SQL) : clé `fields`
+#[derive(Debug, Deserialize, Clone)]
+pub struct FieldDef {
+    pub name: String,
+    #[serde(default)] pub value: String,
+    #[serde(flatten)] pub meta: FieldMeta,
+}
+
 /// Structure d'une action dans config_actions.json
 #[derive(Debug, Deserialize, Clone)]
 pub struct ActionConfig {
@@ -58,6 +83,12 @@ pub struct ActionConfig {
     /// Index de la colonne qui porte le lien (défaut : 1)
     #[serde(default = "default_row_link_col")]
     pub row_link_col: u8,
+    /// Métadonnées d'affichage par champ : { "col": { label, type, fullwidth, readonly, options } }
+    #[serde(default)]
+    pub fields_meta: HashMap<String, FieldMeta>,
+    /// Formulaire sans plugin : liste ordonnée de champs (voir FieldDef)
+    #[serde(default)]
+    pub fields: Vec<FieldDef>,
 }
 
 
@@ -226,7 +257,7 @@ impl Dispatcher {
 
                             // ── Cas standard ─────────────────────────────────
                             PluginResult::Data(data) => {
-                                return self.render_data(data, &ctx);
+                                return self.render_data(data, &ctx, &action.fields_meta, &action.fields);
                             }
                             PluginResult::Error(e) => {
                                 eprintln!("[dispatcher] Plugin error: {}", e);
@@ -291,10 +322,12 @@ impl Dispatcher {
         }
 
         // Route sans plugin
-        self.render_data(serde_json::Value::Null, &ctx)
+        self.render_data(serde_json::Value::Null, &ctx, &action.fields_meta, &action.fields)
     }
         // ── Rendu selon return_type ───────────────────────────────────────────
-        fn render_data(&self, data: serde_json::Value, ctx: &ActionContext) -> tide::Result {
+        fn render_data(&self, data: serde_json::Value, ctx: &ActionContext,
+                       metas: &HashMap<String, FieldMeta>,
+                       fields: &[FieldDef]) -> tide::Result {
             match ctx.return_type.as_str() {
                 "json" => {
                     let body = serde_json::to_string(&data)?;
@@ -305,17 +338,29 @@ impl Dispatcher {
                 }
                 "html" => {
                     let view_name = ctx.view.trim_end_matches(".hbs");
-                    // DEBUG temporaire — à supprimer après diagnostic
-                    println!("[dispatcher] data envoyée au template '{}' :\n{}", 
-                        sanitize_log(view_name), 
-                        serde_json::to_string_pretty(&data).unwrap_or_default()
-                    );
                     // ── Wrapping conditionnel ─────────────────────────────────────
                     // Seuls les Arrays SQL sont wrappés dans { data, row_link, row_link_col }
                     // pour tableGeneric.
                     // Les Objects custom (health_dashboard, etc.) passent INTACTS
                     // → {{status}}, {{sessions.active}} etc. fonctionnent directement.
+                    // fields (config) → fusionnés dans fields_meta
+                    let mut all_metas = metas.clone();
+                    for f in fields { all_metas.insert(f.name.clone(), f.meta.clone()); }
+
                     let data = match data {
+                        // Formulaire sans plugin : construit depuis "fields" (ordre conservé)
+                        serde_json::Value::Null if ctx.form_action.is_some() && !fields.is_empty() => {
+                            let list: Vec<serde_json::Value> = fields.iter().map(|f| serde_json::json!({
+                                "key": f.name, "value": f.value, "fullwidth": f.meta.fullwidth,
+                            })).collect();
+                            let mut w = serde_json::Map::new();
+                            w.insert("data".into(), serde_json::json!([{ "fields": list }]));
+                            w.insert("form_action".into(),
+                                serde_json::Value::String(ctx.form_action.clone().unwrap_or_default()));
+                            w.insert("form_columns".into(),
+                                serde_json::Value::Number(ctx.form_columns.into()));
+                            serde_json::Value::Object(w)
+                        }
                         // Déjà enrichi par plugin_sql (data_resources non vide) → intact
                         serde_json::Value::Object(ref m) if m.contains_key("data") => data,
 
@@ -360,62 +405,14 @@ impl Dispatcher {
                         // Object custom (health, auth...) → intact
                         other => other,
                     };
-                    /*let data = match data {
-                        // Array SQL → wrapper avec row_link pour tableGeneric
-                        serde_json::Value::Array(_) => {
-                            let mut w = serde_json::Map::new();
-                            w.insert("row_link".into(),
-                                serde_json::Value::String(
-                                    ctx.row_link.clone().unwrap_or_default()
-                                ));
-                            w.insert("row_link_col".into(),
-                                serde_json::Value::Number(ctx.row_link_col.into()));
-                            w.insert("data".into(), data);
-                            serde_json::Value::Object(w)
-                        }
-                        // Déjà enrichi par plugin_sql (formGeneric) → intact
-                        serde_json::Value::Object(ref m) if m.contains_key("data") => data,
-                        // Object custom (health_dashboard, auth...) → intact
-                        other => other,
-                    };*/
-                    
+                    // fields_meta : label / type / options par champ (formulaires)
+                    let mut data = data;
+                    apply_fields_meta(&mut data, &all_metas);
 
-
-                    // Injecter form_action + form_columns + form_fullwidth_fields
-                    // si défini et que les données ne sont pas déjà enrichies par plugin_sql
-                    /*let data = if let Some(fa) = &ctx.form_action {
-                        match &data {
-                            serde_json::Value::Object(map) if map.contains_key("data") => data,
-                            serde_json::Value::Array(arr) => {
-                                // Enrichir chaque record avec le flag fullwidth par champ
-                                let fullwidth_set: std::collections::HashSet<&String> =
-                                    ctx.form_fullwidth_fields.iter().collect();
-                                let data_with_meta: Vec<serde_json::Value> = arr.iter()
-                                    .map(|row| {
-                                        if let serde_json::Value::Object(obj) = row {
-                                            let fields: Vec<serde_json::Value> = obj.iter()
-                                                .map(|(k, v)| serde_json::json!({
-                                                    "key":       k,
-                                                    "value":     v,
-                                                    "fullwidth": fullwidth_set.contains(k),
-                                                }))
-                                                .collect();
-                                            serde_json::json!({ "fields": fields })
-                                        } else { row.clone() }
-                                    }).collect();
-                                let mut w = serde_json::Map::new();
-                                w.insert("data".into(), serde_json::Value::Array(data_with_meta));
-                                w.insert("form_action".into(),
-                                    serde_json::Value::String(fa.clone()));
-                                w.insert("form_columns".into(),
-                                    serde_json::Value::Number(ctx.form_columns.into()));
-                                serde_json::Value::Object(w)
-                            }
-                            _ => data,
-                        }
-                    } else {
-                        data
-                    };*/
+                    // DEBUG temporaire — JSON final envoyé au template
+                    println!("[dispatcher] data envoyée au template '{}' :\n{}",
+                        sanitize_log(view_name),
+                        serde_json::to_string_pretty(&data).unwrap_or_default());
 
                     match self.hbs.render(view_name, &data) {
                         Ok(html) => Ok(Response::builder(200)
@@ -475,6 +472,51 @@ impl Dispatcher {
             .body(serde_json::json!({ "error": safe_msg }).to_string())
             .content_type("application/json")
             .build())
+    }
+}
+
+/// Enrichit data[0].fields avec label/type/readonly/fullwidth/options (fields_meta)
+fn apply_fields_meta(data: &mut serde_json::Value, metas: &HashMap<String, FieldMeta>) {
+    use serde_json::{json, Value};
+    if metas.is_empty() { return; }
+    let Value::Object(root) = data else { return };
+    let mut static_res: Vec<(String, Value)> = Vec::new();
+
+    if let Some(Value::Array(rows)) = root.get_mut("data") {
+        if let Some(Value::Object(row0)) = rows.get_mut(0) {
+            if let Some(Value::Array(fields)) = row0.get_mut("fields") {
+                for f in fields.iter_mut() {
+                    let Value::Object(fo) = f else { continue };
+                    let key = fo.get("key").and_then(|k| k.as_str()).unwrap_or("").to_string();
+                    let current = fo.get("value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    match metas.get(&key) {
+                        Some(m) => {
+                            fo.insert("label".into(), json!(m.label.clone().unwrap_or_else(|| key.clone())));
+                            fo.insert("type".into(),  json!(m.input_type.clone().unwrap_or_else(|| "text".into())));
+                            fo.insert("readonly".into(), json!(m.readonly));
+                            if m.fullwidth { fo.insert("fullwidth".into(), json!(true)); }
+                            if !m.options.is_empty() {
+                                let opts: Vec<Value> = m.options.iter().map(|o| json!({
+                                    "val": o.val, "label": o.label,
+                                    "selected": !current.is_empty() && o.val == current,
+                                })).collect();
+                                static_res.push((key.clone(), Value::Array(opts)));
+                            }
+                        }
+                        None => {
+                            fo.insert("label".into(), json!(key));
+                            fo.insert("type".into(),  json!("text"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !static_res.is_empty() {
+        let res = root.entry("resources").or_insert_with(|| json!({}));
+        if let Value::Object(rm) = res {
+            for (k, v) in static_res { rm.entry(k).or_insert(v); }
+        }
     }
 }
 
@@ -545,4 +587,3 @@ fn urlencoding_decode(s: &str) -> String {
  
     result
 }
-

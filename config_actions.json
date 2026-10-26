@@ -329,21 +329,30 @@
         "return_type": "json"
     },
     "GET/view/ia_datasets/add": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "view":        "generics/formGeneric.hbs",
-        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets LIMIT 1",
+        "view": "generics/formGeneric.hbs",
+        "return_type": "html",
         "form_action": "/insert_ia_dataset",
         "form_columns": 2,
-        "form_fullwidth_fields" : ["file_path"],
-        "return_type": "html",
-        "data_resources": {},
-        "sql_resources": {}
+        "fields": [
+            { "name": "name",        "label": "Nom du dataset" },
+            { "name": "version",     "label": "Version", "value": "1.0" },
+            { "name": "format",      "label": "Format",
+            "options": [
+                { "val": "csv",     "label": "CSV" },
+                { "val": "jsonl",   "label": "JSONL" },
+                { "val": "parquet", "label": "Parquet" }
+            ] },
+            { "name": "nb_examples", "label": "Nombre d'exemples", "type": "number" },
+            { "name": "file_path",   "label": "Fichier", "fullwidth": true },
+            { "name": "description", "label": "Description", "type": "textarea", "fullwidth": true }
+        ]
     },
-    "POST/add_ia_dataset": {
+    "POST/insert_ia_dataset": {
         "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "INSERT INTO ia_datasets (name, version, file_path) VALUES (:name, :version, :file_path)",
-        "return_type": "html",
-        "redirect_to": "/view/ia_datasets"
+        "sql":         "INSERT INTO ia_datasets (name, version, file_path, format, nb_examples) VALUES (:name, :version, :file_path, :format, :nb_examples)",
+        "return_type": "redirect",
+        "redirect_to": "/view/ia_datasets",
+        "auth":        false
     },
     "GET/view/ia_datasets/:id/edit": {
         "plugin":      "./target/release/libplugin_sql.so",
