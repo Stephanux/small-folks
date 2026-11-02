@@ -81,6 +81,7 @@ small-folks/
 │   │   └── footer.hbs
 │   └── specifics/                   ← templates spécifiques au projet
 │       ├── chart_capteurs.hbs       ← courbes Chart.js température + humidité
+│       ├── form_user.hbs
 │       └── form_countries.hbs
 ├── public/
 │   ├── css/styles.css               ← styles globaux + formulaires + dashboard
@@ -126,6 +127,33 @@ Dispatcher : rendu selon return_type
   ↓
 HTTP response
 ```
+
+---
+
+## Le dispatcher en détail
+
+### Comment une requête est routée vers un plugin
+
+Le `Dispatcher` (`src/dispatcher.rs`) possède trois éléments : l'annuaire des actions lu dans `config_actions.json`, la table des plugins déjà chargés (`HashMap<String, Box<dyn Plugin>>`) et le moteur Handlebars. Pour chaque requête :
+
+1. **Résolution de l'action** : la clé `"MÉTHODE/chemin"` (ex. `GET/capteurs/chart/:sensor_id`) est recherchée dans `config_actions.json`. Les segments `:param` de l'URL, la query string et le corps du formulaire sont fusionnés dans `ctx.params`.
+2. **Authentification** : si l'action porte `"auth": true`, le dispatcher vérifie le cookie `session_id` (voir la section Authentification) avant d'aller plus loin.
+3. **Choix du plugin** : si le champ `plugin` est non vide, le dispatcher en extrait le nom à partir du chemin du `.so`, puis cherche ce nom dans sa table de plugins. Un plugin absent produit une erreur HTTP 500 (« Plugin non chargé »).
+4. **Exécution** : le dispatcher appelle `plugin.execute(&ctx, &state)`. L'`ActionContext` transporte tout ce dont le plugin a besoin (`sql`, `collection`, `params`...), si bien que le plugin ignore tout de la route.
+5. **Traitement du résultat** : selon le `PluginResult` renvoyé (`Data`, `Error`, `AuthSuccess`, `AuthError`, `AuthLogout`), le dispatcher rend une vue, renvoie du JSON, redirige (HTTP 303) ou affiche une erreur.
+
+Une action sans clé `plugin` ni `sql` reste possible : le dispatcher construit alors lui-même un formulaire à partir de la clé `fields` (voir plus bas).
+
+### Enveloppe des données avant le rendu
+
+Avant d'appeler Handlebars, le dispatcher normalise ce que le plugin a renvoyé :
+
+| Donnée reçue du plugin | Traitement |
+|---|---|
+| Tableau SQL | enveloppé dans `{ data, row_link, row_link_col }` |
+| Objet personnalisé (health, auth) | passe intact |
+| Objet qui contient déjà une clé `data` (formGeneric enrichi) | passe intact |
+| Action avec `form_action` | injection de `form_action`, `form_columns` et des champs pleine largeur dans l'enveloppe |
 
 ---
 
@@ -359,6 +387,8 @@ Centralisés dans `src/helpers_hbs.rs`, enregistrés via `crate::helpers_hbs::re
 
 Opérateurs : `==` `===` `!=` `!==` `>` `>=` `<` `<=`
 
+Côté Rust, ce helper est une structure `CompareHelper` qui implémente `HelperDef`, avec les lifetimes `'reg: 'rc` obligatoires. Une simple closure ne compile pas pour ce cas.
+
 ### Helper `json` — injection JSON brut dans `<script>`
 
 ```handlebars
@@ -438,19 +468,20 @@ Le dispatcher lit cette configuration, puis le plugin (`plugin_sql`, `plugin_aut
 exécute la requête fournie dans son contexte (`ctx.sql`). Les paramètres nommés
 sont convertis en `?` positionnels par `plugin_core::named_to_positional`.
 
-Modifier une requête SQL ne demande donc aucune recompilation du plugin.
-Les fichiers du dossier `sql/` servent uniquement à créer les tables
-(`create_*.sql`), pas à définir les requêtes des actions.
+Modifier une requête SQL ne demande donc aucune recompilation du plugin : un simple
+redémarrage du serveur suffit. Les fichiers du dossier `sql/` servent uniquement à
+créer les tables (`create_*.sql`), pas à définir les requêtes des actions.
 
 Exemple :
 
-​```json
+```json
 "GET/capteurs/chart/:sensor_id": {
     "plugin": "./target/release/libplugin_sql.so",
     "sql": "SELECT ... FROM capteurs WHERE sensor_id = :sensor_id",
     "view": "specifics/chart_capteurs.hbs"
 }
-​```
+```
+
 ### Templates Handlebars Rust
 - `{{this}}` et non `{{.}}`
 - `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers
@@ -462,6 +493,19 @@ Exemple :
 ---
 
 ## Authentification (plugin_auth)
+
+### Fonctionnement
+
+L'authentification repose sur trois opérations de `plugin_auth`, choisies par le champ `operation` de l'action : `login`, `logout` et `me`.
+
+1. **Login** : le plugin exécute la requête `ctx.sql` de l'action (voir plus bas) avec le `login` et le mot de passe reçus. Si une ligne est trouvée, il génère un **JWT** signé en HS256 (clé `JWT_SECRET`) et un identifiant de session. Il renvoie `AuthSuccess`, et le dispatcher pose deux cookies : `session_id` (en `HttpOnly`, donc inaccessible à JavaScript) et `jwt_token`. Si aucune ligne n'est trouvée, `AuthError` redirige vers `/login?error=1`.
+2. **Sessions** : elles sont conservées en mémoire du serveur (`Arc<Mutex<HashMap>>`) et expirent après `SESSION_TTL_SECONDS`. Un redémarrage du serveur les efface donc toutes.
+3. **Contrôle d'accès** : pour toute action portant `"auth": true`, le dispatcher lit le cookie `session_id` (injecté dans `ctx.params`) et vérifie qu'il correspond à une session non expirée. Sinon, il refuse l'accès ou redirige vers `/login`.
+4. **Logout** : `AuthLogout` supprime la session et redirige vers `redirect_to`.
+
+Le JWT contient l'identifiant et le nom de l'utilisateur, sa fonction et les dates d'émission et d'expiration (`iat`, `exp`), repris des alias SQL ci-dessous.
+
+Avec Tide, plusieurs cookies dans une même réponse se posent avec `insert_header` pour le premier, puis `append_header` pour les suivants. Appeler `header()` deux fois écraserait le premier cookie.
 
 ### Convention d'alias SQL
 
@@ -487,6 +531,15 @@ Exemple :
 ```
 
 > **⚠️ Mots de passe bcrypt** : la comparaison SQL directe ne fonctionne pas avec `password_hash()`.
+
+---
+
+## Encodage UTF-8
+
+Deux points garantissent que les accents et caractères spéciaux traversent correctement le framework :
+
+- **Connexion MySQL** : le pool sqlx exécute `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci` à chaque nouvelle connexion (`after_connect`).
+- **Données de formulaire** : `urlencoding_decode` accumule les octets décodés dans un `Vec<u8>`, puis les convertit en une seule fois avec `String::from_utf8_lossy`. Convertir octet par octet (`byte as char`) corromprait les caractères sur plusieurs octets (é, à, €...).
 
 ---
 
@@ -525,6 +578,8 @@ Astuce UPDATE photo optionnelle :
 ```sql
 UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:id
 ```
+
+Le dossier `uploads/` doit exister au démarrage, car il est servi par `serve_dir`. Comme Git ne versionne pas les dossiers vides, ajoutez un fichier `uploads/.gitkeep`.
 
 ---
 
@@ -586,6 +641,29 @@ CREATE TABLE IF NOT EXISTS capteurs (
 
 ---
 
+## Graphiques Chart.js (chart_capteurs.hbs)
+
+Le template `specifics/chart_capteurs.hbs` affiche les mesures des capteurs sous forme de courbes **température** et **humidité** (Chart.js), avec des sélecteurs de capteur et de période et des statistiques min / moyenne / max.
+
+Deux routes l'alimentent, qui utilisent le même template :
+
+- `GET/capteurs/chart` : les mesures de tous les capteurs (voir « Routes suggérées » ci-dessus) ;
+- `GET/capteurs/chart/:sensor_id` : les mesures d'un seul capteur, triées par date croissante.
+
+```json
+"GET/capteurs/chart/:sensor_id": {
+    "plugin":      "./target/release/libplugin_sql.so",
+    "sql":         "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs WHERE sensor_id = :sensor_id ORDER BY timestamp ASC",
+    "view":        "specifics/chart_capteurs.hbs",
+    "return_type": "html",
+    "auth":        true
+}
+```
+
+Les données SQL sont transmises au JavaScript de la page avec le helper `json` en **triple accolades** : `const data = {{{json data}}};`. Avec deux accolades, Handlebars échapperait les guillemets et le JSON deviendrait invalide.
+
+---
+
 ## Firewall eBPF/XDP (ebpf_worker)
 
 Filtre les paquets réseau **dans le kernel Linux** avant la stack TCP/IP — protection contre les attaques SYN flood.
@@ -616,6 +694,8 @@ Paquet réseau entrant (NIC)
 | `BLACKLIST` | `HashMap<u32, u64>` | IPs bloquées + timestamp |
 | `CONFIG` | `Array<u64>` | `[rate_limit, window_ns]` |
 | `STATS` | `Array<u64>` | `[paquets, drops, syn]` |
+
+Dans le programme kernel, une map de type `Array` n'offre ni `set()` ni `insert()`. On écrit une valeur en récupérant un pointeur avec `get_ptr_mut()`, puis en affectant `*ptr = valeur`.
 
 ### Compilation du programme kernel
 
