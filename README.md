@@ -428,6 +428,29 @@ Ne pas dupliquer — `regex = "1"` dans `plugin-core/Cargo.toml` suffit.
 - Paramètres nommés `:param` → convertis automatiquement en `?` positionnels
 - `plugin_auth` utilise `ctx.sql` — requête définie dans `config_actions.json`
 
+### Où sont définies les requêtes SQL ?
+
+Les requêtes SQL ne sont pas écrites en dur dans le code Rust. Elles sont
+externalisées dans `config_actions.json` : chaque action (route) possède un
+champ `"sql"` contenant la requête, avec des paramètres nommés `:param`.
+
+Le dispatcher lit cette configuration, puis le plugin (`plugin_sql`, `plugin_auth`)
+exécute la requête fournie dans son contexte (`ctx.sql`). Les paramètres nommés
+sont convertis en `?` positionnels par `plugin_core::named_to_positional`.
+
+Modifier une requête SQL ne demande donc aucune recompilation du plugin.
+Les fichiers du dossier `sql/` servent uniquement à créer les tables
+(`create_*.sql`), pas à définir les requêtes des actions.
+
+Exemple :
+
+​```json
+"GET/capteurs/chart/:sensor_id": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT ... FROM capteurs WHERE sensor_id = :sensor_id",
+    "view": "specifics/chart_capteurs.hbs"
+}
+​```
 ### Templates Handlebars Rust
 - `{{this}}` et non `{{.}}`
 - `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers

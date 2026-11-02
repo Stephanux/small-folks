@@ -343,8 +343,7 @@
                 { "val": "parquet", "label": "Parquet" }
             ] },
             { "name": "nb_examples", "label": "Nombre d'exemples", "type": "number" },
-            { "name": "file_path",   "label": "Fichier", "fullwidth": true },
-            { "name": "description", "label": "Description", "type": "textarea", "fullwidth": true }
+            { "name": "file_path",   "label": "Fichier", "fullwidth": true }
         ]
     },
     "POST/insert_ia_dataset": {
@@ -354,13 +353,25 @@
         "redirect_to": "/view/ia_datasets",
         "auth":        false
     },
-    "GET/view/ia_datasets/:id/edit": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets WHERE id = :id",
-        "view":        "generics/formGeneric.hbs",
+    "GET/view/ia_dataset/:id": {
+        "plugin": "./target/release/libplugin_sql.so",
+        "sql": "SELECT CAST(id AS CHAR) AS id, name, version, format, CAST(nb_examples AS CHAR) AS nb_examples, file_path FROM ia_datasets WHERE id = :id",
+        "view": "generics/formGeneric.hbs",
         "form_action": "/update_ia_dataset",
         "form_columns": 2,
-        "return_type": "html"
+        "return_type": "html",
+        "auth": true,
+        "fields_meta": {
+            "id":          { "label": "Identifiant", "readonly": true },
+            "name":        { "label": "Nom du dataset" },
+            "version":     { "label": "Version" },
+            "format":      { "label": "Format", "options": [
+                            { "val": "csv",     "label": "CSV" },
+                            { "val": "jsonl",   "label": "JSONL" },
+                            { "val": "parquet", "label": "Parquet" } ] },
+            "nb_examples": { "label": "Nombre d'exemples", "type": "number" },
+            "file_path":   { "label": "Fichier", "fullwidth": true }
+        }
     },
     "POST/update_ia_dataset": {
         "plugin":      "./target/release/libplugin_sql.so",
