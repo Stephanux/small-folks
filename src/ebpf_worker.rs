@@ -46,7 +46,7 @@ pub async fn start(pool: MySqlPool) {
         .parse::<u64>().unwrap_or(60);
     let auto_unblock_secs = std::env::var("EBPF_AUTO_UNBLOCK_SECS")
         .unwrap_or_else(|_| "300".to_string())
-        .parse::<u64>().unwrap_or(300);
+        .parse::<u64>().unwrap_or(300);    
 
     println!("[ebpf_worker] Interface  : {}", interface);
     println!("[ebpf_worker] Programme  : {}", program_path);
@@ -68,6 +68,10 @@ async fn run(
     window_secs:       u64,
     auto_unblock_secs: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    
+    // Intervalle d'affichage des stats en secondes. 0 = jamais.
+    let stats_log_secs: u64 = std::env::var("EBPF_STATS_LOG_SECS")
+    .ok().and_then(|v| v.parse().ok()).unwrap_or(60);
 
     // ── 1. Lire le binaire eBPF compilé ───────────────────────────────────────
     let program_bytes = std::fs::read(program_path)
@@ -109,16 +113,21 @@ async fn run(
 
     // ── 5. Boucle de monitoring (toutes les 5s) ───────────────────────────────
     let mut interval = tokio::time::interval(Duration::from_secs(5));
+    let mut elapsed: u64 = 0;
 
     loop {
         interval.tick().await;
+        elapsed += 5;
 
         // Lire les statistiques globales
-        if let Ok(stats) = read_stats(&bpf) {
-            println!(
-                "[ebpf_worker] Stats → paquets:{} drops:{} syn:{}",
-                stats[0], stats[1], stats[2]
-            );
+        if stats_log_secs > 0 && elapsed >= stats_log_secs {
+            elapsed = 0;
+            if let Ok(stats) = read_stats(&bpf) {
+                println!(
+                    "[ebpf_worker] Stats → paquets:{} drops:{} syn:{}",
+                    stats[0], stats[1], stats[2]
+                );
+            }
         }
 
         // Synchroniser la blacklist eBPF → MySQL
