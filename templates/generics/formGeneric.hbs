@@ -64,8 +64,10 @@
 {{> partials/footer}}
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const form_action = (document.getElementById("formgeneric").action.split('8080/')[1]).split('_')[0];
-        console.log("type action : ", form_action);
+        const path = new URL(document.getElementById("formgeneric").action).pathname;
+        const segments = path.split('/').filter(Boolean);
+        const form_action = segments.find(s => /^(insert|update|delete)_/.test(s))?.split('_')[0]; // "insert" ou "update"
+        console.log("type action : ", form_action); 
         {{!-- 
             // Utilisation du paramètre config_actions.json "form_action" pour détecter le type de formulaire (insertion ou modification) et dans le cas de l'insertion on efface les données du formulaire via la boucle ci-dessousz
         --}}
