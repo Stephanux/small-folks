@@ -274,8 +274,15 @@ impl Dispatcher {
                                     .parse::<i64>()
                                     .unwrap_or(3600);
 
+                                // next vide → LOGIN_REDIRECT ; sinon on n'accepte qu'un chemin local
+                                let target = if redirect_to.trim().is_empty() {
+                                    std::env::var("LOGIN_REDIRECT").unwrap_or_else(|_| "/index".to_string())
+                                } else {
+                                    sanitize_redirect(&redirect_to)
+                                };
+
                                 let mut res = tide::Response::new(303);
-                                res.insert_header("Location", redirect_to.as_str());
+                                res.insert_header("Location", target.as_str());
 
                                 // Cookie session_id — HttpOnly (non accessible JS)
                                 res.insert_header(

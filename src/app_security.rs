@@ -23,31 +23,32 @@
 /// assert_eq!(sanitize_redirect(""),                    "/");
 /// ```
 pub fn sanitize_redirect(url: &str) -> String {
-    let url = url.trim();
+    // 1. Supprimer tous les caractères de contrôle AVANT de valider
+    //    (\t \r \n et autres sont ignorés par les navigateurs dans une URL)
+    let cleaned: String = url.chars().filter(|c| !c.is_control()).collect();
+    let url = cleaned.trim();
 
-    // URL vide → racine
     if url.is_empty() {
         return "/".to_string();
     }
 
-    // Doit commencer par / mais pas par // (protocol-relative URL)
-    // et ne pas contenir de schéma (http:, https:, javascript:, etc.)
     let lower = url.to_lowercase();
     let is_safe = url.starts_with('/')
         && !url.starts_with("//")
+        && !url.contains('\\')            // "/\evil.com" est lu comme "//evil.com"
         && !lower.contains(':')
         && !lower.contains("javascript")
         && !lower.contains("<script");
 
     if is_safe {
-        // Supprimer les sauts de ligne qui pourraient causer du header splitting
-        url.replace(['\r', '\n'], "")
+        url.to_string()
     } else {
         eprintln!("[security] Open Redirect bloqué : '{}'", sanitize_log(url));
         "/".to_string()
     }
 }
 
+ 
 /// Nettoie une valeur destinée à être placée dans un header HTTP.
 /// Protège contre le Header Splitting (injection de \r\n).
 ///
@@ -93,7 +94,7 @@ pub fn sanitize_html(input: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-#[cfg(test)]
+#[cfg(test)]        
 mod tests {
     use super::*;
 
@@ -109,6 +110,9 @@ mod tests {
         assert_eq!(sanitize_redirect("http://evil.com"),      "/");
         assert_eq!(sanitize_redirect("https://evil.com"),     "/");
         assert_eq!(sanitize_redirect("//evil.com/path"),      "/");
+        assert_eq!(sanitize_redirect("/\t/evil.com"),   "/");
+        assert_eq!(sanitize_redirect("/\\evil.com"),    "/");
+        assert_eq!(sanitize_redirect("/\r\n/evil.com"), "/");
         assert_eq!(sanitize_redirect("javascript:alert(1)"),  "/");
         assert_eq!(sanitize_redirect(""),                     "/");
         assert_eq!(sanitize_redirect("relative/no/slash"),    "/");
