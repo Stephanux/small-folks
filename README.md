@@ -99,7 +99,7 @@ small-folks/
 
 ## Flux d'une requête HTTP
 
-![alt Schéma architecture](https://mascaron.net/schema_architecture_small_folksv6.png)
+![alt Schéma architecture](https://mascaron.net/small-folks_schéma_architecture_et_modules.png)
 
 ```
 Client HTTP
