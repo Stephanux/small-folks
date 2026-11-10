@@ -81,9 +81,9 @@ fn collect_metrics(state: &AppState) -> Value {
     };
 
     // ── Pings bases de données ────────────────────────────────────────────────
-    // MySQL  : block_in_place + handle.block_on  (pool sqlx lié au runtime principal)
-    // MongoDB: block_in_place + HEALTH_RT.block_on (client isolé du runtime principal)
-    let db_status = ping_databases(state);
+    // MySQL  : plugin_core::db (runtime + pool propres au plugin)
+    // MongoDB: HEALTH_RT (client isolé)
+    let db_status = ping_databases();
 
     // ── RAM via sysinfo ───────────────────────────────────────────────────────
     let mut sys = System::new_all();
@@ -97,7 +97,6 @@ fn collect_metrics(state: &AppState) -> Value {
     // ── Disque ────────────────────────────────────────────────────────────────
     let disks     = Disks::new_with_refreshed_list();
     let disk_info = find_main_disk(&disks);
-    println!("disks : {:?}", disks);
     // ── Uptime ────────────────────────────────────────────────────────────────
     let uptime_secs = System::uptime();
 
@@ -143,23 +142,25 @@ fn collect_metrics(state: &AppState) -> Value {
 
 // ── Pings ─────────────────────────────────────────────────────────────────────
 
-fn ping_databases(state: &AppState) -> Value {
+fn ping_databases() -> Value {
     let ctx = get_health_ctx();
 
-    // MySQL : utilise le pool du runtime principal (block_in_place requis)
-    let mysql = tokio::task::block_in_place(|| {
-        state.handle.block_on(async {
+    // MySQL : runtime + pool propres au plugin (plugin_core::db), comme plugin_sql.
+    // Aucun lien avec le runtime/pool de l'hôte → pas de blocage inter-cdylib.
+    let mysql = match plugin_core::db::sql_ctx() {
+        Err(e) => json!({ "status": "error", "error": e }),
+        Ok(c) => c.rt.block_on(async {
             let t0 = Instant::now();
             match tokio::time::timeout(
                 Duration::from_secs(3),
-                sqlx::query("SELECT 1").fetch_one(&state.pool)
+                sqlx::query("SELECT 1").fetch_one(&c.pool)
             ).await {
                 Ok(Ok(_))  => json!({ "status": "ok",    "latency_ms": t0.elapsed().as_millis() as u64 }),
                 Ok(Err(e)) => json!({ "status": "error", "error": e.to_string() }),
                 Err(_)     => json!({ "status": "error", "error": "timeout (>3s)" }),
             }
-        })
-    });
+        }),
+    };
 
     // MongoDB : utilise HEALTH_RT → heartbeat isolé du runtime principal
     let mongodb = match &ctx.mongo {
@@ -169,9 +170,8 @@ fn ping_databases(state: &AppState) -> Value {
             let db_name = std::env::var("MONGODB_DB")
                 .unwrap_or_else(|_| "admin".to_string());
 
-            // Pas besoin de block_in_place ici car HEALTH_RT est autonome
-            // On lance le ping depuis le thread courant en bloquant sur HEALTH_RT
-            tokio::task::block_in_place(|| {
+            // HEALTH_RT est autonome : on bloque directement dessus
+            {
                 ctx.rt.block_on(async move {
                     let t0 = Instant::now();
                     match tokio::time::timeout(
@@ -184,7 +184,7 @@ fn ping_databases(state: &AppState) -> Value {
                         Err(_)     => json!({ "status": "error", "error": "timeout (>3s)" }),
                     }
                 })
-            })
+            }
         }
     };
 

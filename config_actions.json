@@ -83,6 +83,7 @@
         "view": "generics/tableGeneric.hbs",
         "row_link":    "/view/user",
         "row_link_col": 0,
+        "auth": true,
         "return_type": "html"
     },
     "GET/view/user": {
@@ -118,18 +119,21 @@
         "sql": "UPDATE users SET name = :name, firstName = :firstName, login = :login, mdp = :mdp, function = :function, office = :office,  date_naiss = :date_naiss, addresse1 = :addresse1, addresse2 = :addresse2, cp = :cp, city = :city,  code_countries = :code_countries, mobile_phone = :mobile_phone, home_phone = :home_phone WHERE id_users = :id_users",
         "view": "",
         "return_type": "redirect",
+        "auth": true,
         "redirect_to": "/users"
     },
     "GET/communes": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT Code_commune_INSEE, Nom_de_la_commune, Code_postal FROM communes ORDER BY Code_commune_INSEE",
         "view": "generics/tableGeneric.hbs",
+        "auth": true,
         "return_type": "html"
     },
     "GET/countries": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT code, name_us, name_fr, region FROM countries ORDER BY name_us",
         "view": "generics/tableGeneric.hbs",
+        "auth": true,
         "return_type": "html"
     },
     "GET/view/countries": {
@@ -137,6 +141,7 @@
         "sql": "SELECT code, name_us, name_fr, region FROM countries LIMIT 1",
         "view": "generics/formGeneric.hbs",
         "return_type": "html",
+        "auth": true,
         "form_action": "/insert_country"
     },
     "GET/api/countries": {
@@ -162,27 +167,16 @@
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "INSERT INTO countries (code, name_us, name_fr) VALUES (:code, :name_us, :name_fr) ON DUPLICATE KEY UPDATE name_us = :name_us, name_fr = :name_fr",
         "view": "",
+        "auth": true,
         "return_type": "redirect",
         "redirect_to": "/countries"
     },
 	"POST/delete_country": {
         "plugin": "./target/release/libplugin_sql.so",
 		"sql": "delete from countries where code=:code",
-		"view": "generics/tableGeneric.hbs"
+		"view": "generics/tableGeneric.hbs",
+        "auth": true
 	},
-    "PUT/countries/:code": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "UPDATE countries SET name_us = :name_us, name_fr = :name_fr WHERE code = :code",
-        "view": "",
-        "return_type": "redirect",
-        "redirect_to": "/countries"
-    },
-    "DELETE/countries/:code": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "DELETE FROM countries WHERE code = :code",
-        "view": "",
-        "return_type": "json"
-    },
     "GET/regions": {
         "plugin": "./target/release/libplugin_sql.so",
         "sql": "SELECT COALESCE(region, 'Unknown') AS region, CAST(COUNT(*) As CHAR) AS country_count FROM countries GROUP BY region ORDER BY country_count DESC",
@@ -201,49 +195,6 @@
         "sql": "SELECT code, name_us, name_fr FROM countries WHERE region = :name ORDER BY name_us",
         "view": "generics/tableGeneric.hbs",
         "return_type": "html"
-    },
-    "GET/mongo/countries": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{}",
-        "operation": "find",
-        "return_type": "html",
-        "view": "generics/tableGeneric.hbs"
-    },
-    "GET/api/mongo/countries": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{}",
-        "operation": "find",
-        "return_type": "json",
-        "auth": true
-    },
-    "GET/api/mongo/countries/:id": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{\"_id\": \":id\"}",
-        "operation": "find_one",
-        "return_type": "json"
-    },
-    "POST/api/mongo/countries": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "operation": "insert_one",
-        "return_type": "json"
-    },
-    "PUT/api/mongo/countries/:id": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{\"_id\": \":id\"}",
-        "operation": "update_one",
-        "return_type": "json"
-    },
-    "DELETE/api/mongo/countries/:id": {
-        "plugin": "./target/release/libplugin_mongo.so",
-        "collection": "countries",
-        "filter": "{\"_id\": \":id\"}",
-        "operation": "delete_one",
-        "return_type": "json"
     },
     "GET/upload/form": {
         "plugin":      "",
@@ -273,115 +224,6 @@
     "DELETE/uploads/:uuid": {
         "plugin":      "./target/release/libplugin_sql.so",
         "sql":         "DELETE FROM uploads WHERE uuid = :uuid",
-        "return_type": "json"
-    },
-    "GET/capteurs": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs ORDER BY timestamp ASC",
-        "view":        "generics/tableGeneric.hbs",
-        "return_type": "html",
-        "auth":        true,
-        "row_link":    "/capteurs/detail",
-        "row_link_col": 1
-    },
-    "GET/api/capteurs": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs ORDER BY timestamp ASC",
-        "return_type": "json",
-        "auth":        true
-    },
-    "GET/api/capteurs/:sensor_id": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) AS id, sensor_id, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, CAST(timestamp AS CHAR) AS timestamp FROM capteurs WHERE sensor_id = :sensor_id ORDER BY timestamp ASC",
-        "return_type": "json",
-        "auth":        true
-    },
-    "GET/api/capteurs/stats": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT sensor_id, CAST(COUNT(*) AS CHAR) AS total, CAST(AVG(temperature) AS CHAR) AS temp_moy, CAST(MIN(temperature) AS CHAR) AS temp_min, CAST(MAX(temperature) AS CHAR) AS temp_max, CAST(AVG(humidity) AS CHAR) AS hum_moy FROM capteurs GROUP BY sensor_id",
-        "return_type": "json",
-        "auth":        true
-    },
-    "GET/capteurs/chart": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs ORDER BY timestamp ASC",
-        "view":        "specifics/chart_capteurs.hbs",
-        "return_type": "html",
-        "auth":        true
-    },
-    "GET/capteurs/chart/:sensor_id": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(timestamp AS CHAR) AS timestamp, CAST(temperature AS CHAR) AS temperature, CAST(humidity AS CHAR) AS humidity, sensor_id FROM capteurs WHERE sensor_id = :sensor_id ORDER BY timestamp ASC",
-        "view":        "specifics/chart_capteurs.hbs",
-        "return_type": "html",
-        "auth":        true
-    },
-
-    "GET/view/ia_datasets": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets ORDER BY name, version",
-        "view":        "generics/tableGeneric.hbs",
-        "return_type": "html"
-    },
-    "GET/api/ia_datasets": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "SELECT CAST(id AS CHAR) as id, name, version, file_path, format, CAST(nb_examples AS CHAR) as nb_examples, CAST(created_at AS CHAR) as created_at FROM ia_datasets ORDER BY name, version",
-        "return_type": "json"
-    },
-    "GET/view/ia_datasets/add": {
-        "view": "generics/formGeneric.hbs",
-        "return_type": "html",
-        "form_action": "/insert_ia_dataset",
-        "form_columns": 2,
-        "fields": [
-            { "name": "name",        "label": "Nom du dataset" },
-            { "name": "version",     "label": "Version", "value": "1.0" },
-            { "name": "format",      "label": "Format",
-            "options": [
-                { "val": "csv",     "label": "CSV" },
-                { "val": "jsonl",   "label": "JSONL" },
-                { "val": "parquet", "label": "Parquet" }
-            ] },
-            { "name": "nb_examples", "label": "Nombre d'exemples", "type": "number" },
-            { "name": "file_path",   "label": "Fichier", "fullwidth": true }
-        ]
-    },
-    "POST/insert_ia_dataset": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "INSERT INTO ia_datasets (name, version, file_path, format, nb_examples) VALUES (:name, :version, :file_path, :format, :nb_examples)",
-        "return_type": "redirect",
-        "redirect_to": "/view/ia_datasets",
-        "auth":        false
-    },
-    "GET/view/ia_dataset/:id": {
-        "plugin": "./target/release/libplugin_sql.so",
-        "sql": "SELECT CAST(id AS CHAR) AS id, name, version, format, CAST(nb_examples AS CHAR) AS nb_examples, file_path FROM ia_datasets WHERE id = :id",
-        "view": "generics/formGeneric.hbs",
-        "form_action": "/update_ia_dataset",
-        "form_columns": 2,
-        "return_type": "html",
-        "auth": true,
-        "fields_meta": {
-            "id":          { "label": "Identifiant", "readonly": true },
-            "name":        { "label": "Nom du dataset" },
-            "version":     { "label": "Version" },
-            "format":      { "label": "Format", "options": [
-                            { "val": "csv",     "label": "CSV" },
-                            { "val": "jsonl",   "label": "JSONL" },
-                            { "val": "parquet", "label": "Parquet" } ] },
-            "nb_examples": { "label": "Nombre d'exemples", "type": "number" },
-            "file_path":   { "label": "Fichier", "fullwidth": true }
-        }
-    },
-    "POST/update_ia_dataset": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "UPDATE ia_datasets SET name = :name, version = :version, file_path = :file_path WHERE id = :id",
-        "return_type": "redirect",
-        "redirect_to": "/view/ia_datasets"
-    },
-    "GET/delete_ia_dataset/:id": {
-        "plugin":      "./target/release/libplugin_sql.so",
-        "sql":         "DELETE FROM ia_datasets WHERE id = :id",
         "return_type": "json"
     }
 
