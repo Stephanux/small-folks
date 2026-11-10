@@ -64,133 +64,120 @@ fn do_login(ctx: &ActionContext, state: &AppState) -> PluginResult {
     let jwt_secret = std::env::var("JWT_SECRET")
         .unwrap_or_else(|_| "small-folks-secret-change-me".to_string());
 
-    let pool     = state.pool.clone();
     let sessions = state.sessions.clone();
 
-    tokio::task::block_in_place(|| {
-        state.handle.block_on(async move {
-            // Exécution de la requête SQL depuis la config
-            let mut query = sqlx::query(&sql_prepared);
-            for val in &param_values {
-                query = query.bind(val);
+    // Runtime + pool PROPRES au plugin (voir plugin-core/src/db.rs)
+    let c = match plugin_core::db::sql_ctx() {
+        Ok(c)  => c,
+        Err(e) => return PluginResult::AuthError(format!("SQL : {}", e)),
+    };
+
+    // Seule la requête est exécutée dans le runtime ; le reste est synchrone
+    let row = c.rt.block_on(async {
+        let mut query = sqlx::query(&sql_prepared);
+        for val in &param_values {
+            query = query.bind(val);
+        }
+        query.fetch_optional(&c.pool).await
+    });
+
+    match row {
+        Err(e) => PluginResult::AuthError(format!("Erreur base de données : {}", e)),
+        Ok(None) => PluginResult::AuthError("Identifiants incorrects".into()),
+        Ok(Some(row)) => {
+            // ── Lecture des colonnes par alias ────────────────────────────────
+            let cols: HashMap<String, String> = row.columns().iter()
+                .enumerate()
+                .map(|(i, col)| {
+                    let val: Option<String> = row.try_get(i).ok();
+                    (col.name().to_string(), val.unwrap_or_default())
+                })
+                .collect();
+
+            let id_str = cols.get("id")
+                .or_else(|| cols.get("id_users"))
+                .or_else(|| cols.get("id_user"))
+                .cloned()
+                .unwrap_or_default();
+            let id: i64 = id_str.parse().unwrap_or(0);
+
+            let name = cols.get("name").cloned().unwrap_or_default();
+
+            let first_name = cols.get("first_name")
+                .or_else(|| cols.get("firstName"))
+                .or_else(|| cols.get("firstname"))
+                .cloned()
+                .unwrap_or_default();
+
+            let login_str = cols.get("login").cloned().unwrap_or(login.clone());
+
+            let function = cols.get("function")
+                .or_else(|| cols.get("role"))
+                .cloned()
+                .unwrap_or_default();
+
+            let office = cols.get("office")
+                .or_else(|| cols.get("department"))
+                .cloned()
+                .unwrap_or_default();
+
+            let now        = now_secs();
+            let expires_at = now + session_ttl;
+            let session_id = Uuid::new_v4().to_string();
+
+            // Stockage dans le cache de sessions
+            {
+                let mut sess = sessions.lock().unwrap();
+                sess.retain(|_, v| v.expires_at > now);
+                sess.insert(session_id.clone(), SessionUser {
+                    id_users:   id,
+                    login:      login_str.clone(),
+                    name:       name.clone(),
+                    first_name: first_name.clone(),
+                    function:   function.clone(),
+                    office:     office.clone(),
+                    expires_at,
+                });
             }
 
-            let row = query.fetch_optional(&pool).await;
-            println!("données authentification : {:?}", row);
-            match row {
-                Err(e) => PluginResult::AuthError(
-                    format!("Erreur base de données : {}", e)
+            // Génération du JWT
+            let claims = JwtClaims {
+                sub:      login_str.clone(),
+                id,
+                name:     format!("{} {}", first_name, name),
+                function: function.clone(),
+                iat:      now,
+                exp:      expires_at,
+            };
+
+            let jwt = match jsonwebtoken::encode(
+                &jsonwebtoken::Header::default(),
+                &claims,
+                &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
+            ) {
+                Ok(t)  => t,
+                Err(e) => return PluginResult::AuthError(
+                    format!("Erreur génération JWT : {}", e)
                 ),
-                Ok(None) => PluginResult::AuthError(
-                    "Identifiants incorrects".into()
-                ),
-                Ok(Some(row)) => {
-                    // ── Lecture des colonnes par alias ────────────────────────
-                    // Convention : les alias SQL définissent le mapping
-                    // Les colonnes sont lues dynamiquement par leur nom
-                    let cols: HashMap<String, String> = row.columns().iter()
-                        .enumerate()
-                        .map(|(i, col)| {
-                            let val: Option<String> = row.try_get(i).ok();
-                            (col.name().to_string(), val.unwrap_or_default())
-                        })
-                        .collect();
+            };
 
-                    // Colonnes attendues (avec fallbacks sur noms courants)
-                    // "id"    → alias recommandé pour la clé primaire
-                    // "name"  → alias pour le nom
-                    // etc.
-                    let id_str = cols.get("id")
-                        .or_else(|| cols.get("id_users"))
-                        .or_else(|| cols.get("id_user"))
-                        .cloned()
-                        .unwrap_or_default();
+            let user_json = json!({
+                "id":         id,
+                "login":      login_str,
+                "name":       name,
+                "first_name": first_name,
+                "function":   function,
+                "office":     office,
+            });
 
-                    let id: i64 = id_str.parse().unwrap_or(0);
-
-                    let name = cols.get("name")
-                        .cloned()
-                        .unwrap_or_default();
-
-                    let first_name = cols.get("first_name")
-                        .or_else(|| cols.get("firstName"))
-                        .or_else(|| cols.get("firstname"))
-                        .cloned()
-                        .unwrap_or_default();
-
-                    let login_str = cols.get("login")
-                        .cloned()
-                        .unwrap_or(login.clone());
-
-                    let function = cols.get("function")
-                        .or_else(|| cols.get("role"))
-                        .cloned()
-                        .unwrap_or_default();
-
-                    let office = cols.get("office")
-                        .or_else(|| cols.get("department"))
-                        .cloned()
-                        .unwrap_or_default();
-
-                    let now        = now_secs();
-                    let expires_at = now + session_ttl;
-                    let session_id = Uuid::new_v4().to_string();
-
-                    // Stockage dans le cache de sessions
-                    {
-                        let mut sess = sessions.lock().unwrap();
-                        sess.retain(|_, v| v.expires_at > now);
-                        sess.insert(session_id.clone(), SessionUser {
-                            id_users:   id,
-                            login:      login_str.clone(),
-                            name:       name.clone(),
-                            first_name: first_name.clone(),
-                            function:   function.clone(),
-                            office:     office.clone(),
-                            expires_at,
-                        });
-                    }
-
-                    // Génération du JWT
-                    let claims = JwtClaims {
-                        sub:      login_str.clone(),
-                        id,
-                        name:     format!("{} {}", first_name, name),
-                        function: function.clone(),
-                        iat:      now,
-                        exp:      expires_at,
-                    };
-
-                    let jwt = match jsonwebtoken::encode(
-                        &jsonwebtoken::Header::default(),
-                        &claims,
-                        &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
-                    ) {
-                        Ok(t)  => t,
-                        Err(e) => return PluginResult::AuthError(
-                            format!("Erreur génération JWT : {}", e)
-                        ),
-                    };
-
-                    let user_json = json!({
-                        "id":         id,
-                        "login":      login_str,
-                        "name":       name,
-                        "first_name": first_name,
-                        "function":   function,
-                        "office":     office,
-                    });
-
-                    PluginResult::AuthSuccess {
-                        session_id,
-                        jwt,
-                        redirect_to: next,
-                        user: user_json,
-                    }
-                }
+            PluginResult::AuthSuccess {
+                session_id,
+                jwt,
+                redirect_to: next,
+                user: user_json,
             }
-        })
-    })
+        }
+    }
 }
 
 // ── LOGOUT ────────────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 tide       = "0.16"
 sqlx       = { version = "0.7", features = ["mysql", "runtime-tokio-native-tls"] }
-tokio      = { version = "1", features = ["rt"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "net"] }
 mongodb    = "^3.5"
 serde      = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }

@@ -13,30 +13,14 @@
 use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult};
 use serde_json::json;
 use std::path::Path;
-use std::sync::OnceLock;
-use tokio::runtime::Runtime;
 use uuid::Uuid;
-
-// ── Runtime Tokio partagé (même pattern que plugin_upload) ───────────────────
-static UPLOAD_RT: OnceLock<Runtime> = OnceLock::new();
-
-fn get_runtime() -> &'static Runtime {
-    UPLOAD_RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .thread_name("plugin-sql-upload")
-            .build()
-            .expect("Impossible de créer le runtime du plugin_sql_upload")
-    })
-}
 
 pub struct PluginSqlUpload;
 
 impl Plugin for PluginSqlUpload {
     fn name(&self) -> &'static str { "sql_upload" }
 
-    fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
+    fn execute(&self, ctx: &ActionContext, _state: &AppState) -> PluginResult {
         // ── Validation configuration ──────────────────────────────────────────
         if ctx.upload_dir.is_empty() {
             return PluginResult::Error(
@@ -75,9 +59,15 @@ impl Plugin for PluginSqlUpload {
         // définie dans config_actions.json — si vide, pas d'INSERT dans uploads
         let sql_upload   = ctx.sql_upload.clone();
         let mut params   = ctx.params.clone();
-        let pool         = state.pool.clone();
 
-        get_runtime().block_on(async move {
+        // Runtime + pool PROPRES au plugin (voir plugin-core/src/db.rs)
+        let c = match plugin_core::db::sql_ctx() {
+            Ok(c)  => c,
+            Err(e) => return PluginResult::Error(e),
+        };
+        let pool = c.pool.clone();
+
+        c.rt.block_on(async move {
             // ── Étape 1 : créer le dossier de destination ─────────────────────
             if let Err(e) = tokio::fs::create_dir_all(&upload_dir).await {
                 return PluginResult::Error(

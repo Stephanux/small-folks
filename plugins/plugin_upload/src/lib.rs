@@ -3,30 +3,14 @@ use plugin_core::{ActionContext, AppState, Plugin, PluginRegistrar, PluginResult
 use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::OnceLock;
-use tokio::runtime::Runtime;
 use uuid::Uuid;
-
-// ── Runtime Tokio partagé (même pattern que plugin_mongo) ─────────────────────
-static UPLOAD_RT: OnceLock<Runtime> = OnceLock::new();
-
-fn get_runtime() -> &'static Runtime {
-    UPLOAD_RT.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .thread_name("plugin-upload")
-            .build()
-            .expect("Impossible de créer le runtime Tokio du plugin upload")
-    })
-}
 
 pub struct PluginUpload;
 
 impl Plugin for PluginUpload {
     fn name(&self) -> &'static str { "upload" }
 
-    fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
+    fn execute(&self, ctx: &ActionContext, _state: &AppState) -> PluginResult {
         // ── 1. Validation de la configuration ─────────────────────────────────
         if ctx.upload_dir.is_empty() {
             return PluginResult::Error(
@@ -59,12 +43,18 @@ impl Plugin for PluginUpload {
         // ── 3. Parse multipart + écriture sur disque + insertion MySQL ─────────
         let upload_dir  = ctx.upload_dir.clone();
         let body_bytes  = ctx.body_bytes.clone();
-        let pool        = state.pool.clone();
+
+        // Runtime + pool PROPRES au plugin (voir plugin-core/src/db.rs)
+        let c = match plugin_core::db::sql_ctx() {
+            Ok(c)  => c,
+            Err(e) => return PluginResult::Error(e),
+        };
+        let pool = c.pool.clone();
         // ctx.sql est la requête d'insertion définie dans config_actions.json.
         // Si vide → pas d'INSERT (dépôt sur disque uniquement).
         let sql        = ctx.sql.clone();
 
-        get_runtime().block_on(async move {
+        c.rt.block_on(async move {
             process_upload(
                 body_bytes,
                 boundary,

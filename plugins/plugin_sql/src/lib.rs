@@ -7,14 +7,20 @@ pub struct PluginSQL;
 impl Plugin for PluginSQL {
     fn name(&self) -> &'static str { "sql" }
 
-    fn execute(&self, ctx: &ActionContext, state: &AppState) -> PluginResult {
+    fn execute(&self, ctx: &ActionContext, _state: &AppState) -> PluginResult {
         // Convertit les paramètres nommés ":param" en "?" pour sqlx
         // et collecte les valeurs dans l'ordre d'apparition
         let (sql_prepared, param_values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
         let has_resources = !ctx.data_resources.is_empty();
 
-        tokio::task::block_in_place(|| {
-            state.handle.block_on(async {
+        // Runtime + pool PROPRES au plugin (voir plugin-core/src/db.rs)
+        let c = match plugin_core::db::sql_ctx() {
+            Ok(c)  => c,
+            Err(e) => return PluginResult::Error(e),
+        };
+        let pool = &c.pool;
+
+        c.rt.block_on(async {
                 // ── Requête principale ────────────────────────────────────────
                 let mut query = sqlx::query(&sql_prepared);
                 for val in &param_values {
@@ -24,7 +30,7 @@ impl Plugin for PluginSQL {
                 let sql_upper = ctx.sql.trim().to_uppercase();
 
                 if sql_upper.starts_with("SELECT") {
-                    let rows = match query.fetch_all(&state.pool).await {
+                    let rows = match query.fetch_all(pool).await {
                         Ok(r)  => r,
                         Err(e) => return PluginResult::Error(e.to_string()),
                     };
@@ -61,7 +67,7 @@ impl Plugin for PluginSQL {
                         };
 
                         let res_rows = match sqlx::query(&sql_res)
-                            .fetch_all(&state.pool)
+                            .fetch_all(pool)
                             .await
                         {
                             Ok(r)  => r,
@@ -130,7 +136,7 @@ impl Plugin for PluginSQL {
 
                 } else {
                     // ── Écriture (INSERT / UPDATE / DELETE) ──────────────────
-                    match query.execute(&state.pool).await {
+                    match query.execute(pool).await {
                         Ok(result) => PluginResult::Data(json!({
                             "rows_affected":  result.rows_affected(),
                             "last_insert_id": result.last_insert_id(),
@@ -138,7 +144,6 @@ impl Plugin for PluginSQL {
                         Err(e) => PluginResult::Error(e.to_string()),
                     }
                 }
-            })
         })
     }
 }
