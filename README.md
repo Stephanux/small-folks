@@ -57,6 +57,14 @@ Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées
 
 ## Architecture du workspace
 
+### Vue d'ensemble des modules
+
+![Schéma de l'architecture et des modules de small-folks](https://mascaron.net/small-folks_sch%C3%A9ma_architecture_et_modules.png)
+
+> L'encadré « Frontière cdylib » de ce schéma date d'avant le modèle « un runtime par plugin » : le modèle actuel est décrit dans [Règles critiques FFI cdylib](#règles-critiques-ffi-cdylib).
+
+### Arborescence
+
 ```
 small-folks/
 ├── README.md                        ← ce fichier

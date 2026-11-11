@@ -57,6 +57,14 @@ Routes, SQL/MongoDB queries, views and resources are entirely configured in `con
 
 ## Workspace architecture
 
+### Modules overview
+
+![Architecture and modules diagram of small-folks](https://mascaron.net/small-folks_sch%C3%A9ma_architecture_et_modules.png)
+
+> The diagram labels are in French. Its "Frontière cdylib" box dates from before the runtime-per-plugin design; see [Critical cdylib FFI rules](#critical-cdylib-ffi-rules) for the current model.
+
+### Directory tree
+
 ```
 small-folks/
 ├── README.md                        ← French version
