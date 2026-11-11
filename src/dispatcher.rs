@@ -94,7 +94,7 @@ pub struct ActionConfig {
 
 pub struct Dispatcher {
     config:  HashMap<String, ActionConfig>,
-    plugins: HashMap<String, Box<dyn Plugin>>,
+    plugins: HashMap<String, Arc<dyn Plugin>>,
     hbs:     Arc<Handlebars<'static>>,
 }
 
@@ -117,6 +117,10 @@ impl Dispatcher {
         crate::helpers_hbs::register_all(&mut hbs);
 
 
+
+        // Box<dyn Plugin> → Arc<dyn Plugin> : permet de passer le plugin à spawn_blocking ('static)
+        let plugins: HashMap<String, Arc<dyn Plugin>> =
+            plugins.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
 
         println!("Templates Handlebars chargés depuis : {}", templates_dir);
         Ok(Self { config, plugins, hbs: Arc::new(hbs) })
@@ -252,8 +256,23 @@ impl Dispatcher {
                     None => return self.render_error(500,
                         &format!("Plugin '{}' non chargé", plugin_name)),
                     Some(plugin) => {
-                        let state = req.state().clone();
-                        match plugin.execute(&ctx, &state) {
+                        // Plugin synchrone (FFI) : exécuté dans le pool de threads bloquants
+                        // pour ne jamais bloquer un thread de l'exécuteur Tide.
+                        let plugin  = Arc::clone(plugin);
+                        let state   = req.state().clone();
+                        let handle  = state.handle.clone();
+                        let ctx_job = ctx.clone();
+                        let outcome = handle
+                            .spawn_blocking(move || plugin.execute(&ctx_job, &state))
+                            .await;
+                        let result = match outcome {
+                            Ok(r)  => r,
+                            Err(e) => {
+                                eprintln!("[dispatcher] Plugin '{}' interrompu : {}", plugin_name, e);
+                                return self.render_error(500, "Erreur interne du plugin");
+                            }
+                        };
+                        match result {
 
                             // ── Cas standard ─────────────────────────────────
                             PluginResult::Data(data) => {

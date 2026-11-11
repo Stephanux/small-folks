@@ -4,52 +4,46 @@
 <div class="container">
   <form id="formgeneric" class="generic-form {{#if (eq form_columns 2)}}form-2col{{/if}}"
         method="POST" action="{{form_action}}">
+
     {{!--
-      En mode 2 colonnes, certains champs peuvent être forcés pleine largeur
-      via la liste form_fullwidth_fields.
-      On utilise un helper Handlebars natif : (lookup @root.form_fullwidth_fields @key)
-      ne fonctionne pas pour un tableau — on utilise donc une classe CSS et
-      on laisse le CSS gérer via :nth-child si besoin, OU on entoure chaque champ
-      d'un div dont la classe est conditionnelle.
-      Solution retenue : data-fullwidth="true/false" + CSS selector
+      Chaque champ de data.0.fields arrive sous la forme :
+        { key, value, fullwidth, label?, type?, readonly? }
+      label / type / readonly proviennent de "fields_meta" (config_actions.json).
+      Sans fields_meta : label = key, type = "text".
     --}}
     {{#each data.0.fields}}
     <div class="form-group {{#if fullwidth}}form-group-full{{/if}}">
-      <label class="form-label" for="{{key}}">{{key}}</label>
+      <label class="form-label" for="{{key}}">{{#if label}}{{label}}{{else}}{{key}}{{/if}}</label>
 
       {{#if (lookup @root.resources key)}}
         {{!--
-          Champ avec liste déroulante.
-          Les options arrivent sous la forme :
-            { val: "FR", label: "France", selected: true|false }
-          selected est pré-calculé côté Rust (plugin_sql) en comparant
-          val avec la valeur courante du champ — évite ../value en Handlebars.
-
-          En mode insert (form_action = "insert_XXX") :
-            Les valeurs de data sont vides → selected = false pour toutes les options
-            → "-- choisir --" s'affiche naturellement, pas besoin de cas spécial.
-
-          En mode update (form_action = "update_XXX") :
-            selected = true sur l'option dont val correspond à la valeur du champ.
+          Liste déroulante : options { val, label, selected } (selected pré-calculé côté Rust).
+          Source : data_resources/sql_resources (SQL) ou fields_meta.options (statique).
         --}}
-        <select class="form-input form-select" id="{{key}}" name="{{key}}">
+        <select class="form-input form-select" id="{{key}}" name="{{key}}" {{#if readonly}}disabled{{/if}}>
           <option value="">-- choisir --</option>
           {{#each (lookup @root.resources key)}}
             <option value="{{val}}" {{#if selected}}selected{{/if}}>{{label}}</option>
           {{/each}}
         </select>
+
+      {{else if (eq type "textarea")}}
+        <textarea class="form-input" id="{{key}}" name="{{key}}" rows="4"
+                  {{#if readonly}}readonly{{/if}}>{{value}}</textarea>
+
+      {{else if (eq type "file")}}
+        {{!-- nécessite enctype="multipart/form-data" + plugin_sql_upload --}}
+        <input class="form-input" type="file" id="{{key}}" name="{{key}}">
+
+      {{else if (eq key "image")}}
+        {{!-- compatibilité : ancien cas particulier de la colonne "image" --}}
+        <input type="file" id="image" name="image" accept=".jpg,.jpeg,.png,.pdf"
+               style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
+
       {{else}}
-          {{#if (eq key "image")}}
-              <label for="file" style="display:block; margin-bottom:.4rem; font-weight:500;">
-                  Fichier (jpg, png, pdf — max 5 Mo)
-              </label>
-              <input type="file" id="image" name="image"
-                  accept=".jpg,.jpeg,.png,.pdf"
-                  style="width:100%; padding:.5rem; border:1px solid #ccc; border-radius:4px;">
-          {{else}}
-              <input class="form-input" type="text" id="{{key}}" name="{{key}}" value="{{value}}">
-          {{/if}}
-        {{/if}}
+        <input class="form-input" type="{{#if type}}{{type}}{{else}}text{{/if}}"
+               id="{{key}}" name="{{key}}" value="{{value}}" {{#if readonly}}readonly{{/if}}>
+      {{/if}}
 
     </div>
     {{/each}}
@@ -63,20 +57,31 @@
 </div>
 {{> partials/footer}}
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const path = new URL(document.getElementById("formgeneric").action).pathname;
-        const segments = path.split('/').filter(Boolean);
-        const form_action = segments.find(s => /^(insert|update|delete)_/.test(s))?.split('_')[0]; // "insert" ou "update"
-        console.log("type action : ", form_action); 
-        {{!-- 
-            // Utilisation du paramètre config_actions.json "form_action" pour détecter le type de formulaire (insertion ou modification) et dans le cas de l'insertion on efface les données du formulaire via la boucle ci-dessousz
-        --}}
-        if (form_action === "insert") {
-            const list_fields = document.getElementsByClassName("form-input");
-            for (const el of list_fields) {
-              el.value = "";
-            }
-        }
-        
-    });
+document.addEventListener('DOMContentLoaded', function () {
+  {{!--
+    Mode insert/update détecté depuis form_action ("/insert_XXX" ou "/update_XXX").
+    pathname évite de dépendre du port (l'ancienne version coupait sur "8080/").
+    En mode insert, on vide les champs texte (les selects restent sur "-- choisir --").
+  --}}
+  const form = document.getElementById("formgeneric");
+
+  {{!--
+    Champ fichier présent → le formulaire doit être envoyé en multipart/form-data
+    (sinon plugin_sql_upload reçoit du x-www-form-urlencoded : "sans boundary").
+    Sans champ fichier on garde l'encodage par défaut, que plugin_sql sait lire.
+  --}}
+  if (form.querySelector('input[type="file"]')) {
+    form.setAttribute("enctype", "multipart/form-data");
+  }
+
+  const path = new URL(form.action).pathname;
+  const mode = path.split('/').pop().split('_')[0];
+  console.log("[formGeneric] mode :", mode);
+
+  if (mode === "insert") {
+    for (const el of document.getElementsByClassName("form-input")) {
+      if (el.tagName !== "SELECT" && el.type !== "file") { el.value = ""; }
+    }
+  }
+});
 </script>

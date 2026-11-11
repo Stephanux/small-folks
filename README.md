@@ -6,7 +6,30 @@
 
 Framework web **Rust** basé sur **Tide** avec un système de plugins dynamiques (`cdylib`).
 Routes, requêtes SQL/MongoDB, vues et ressources sont entièrement configurées dans `config_actions.json` **sans recompilation**.
-NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilisable en production.
+
+> **NB :** Small-Folks est développé pour un usage **pédagogique** (IUT Réseaux & Télécoms), il n'est pas destiné à la production.
+
+---
+
+## Sommaire
+
+1. [Stack technique](#stack-technique)
+2. [Architecture du workspace](#architecture-du-workspace)
+3. [Flux d'une requête HTTP](#flux-dune-requête-http)
+4. [Le dispatcher en détail](#le-dispatcher-en-détail)
+5. [config_actions.json — référence complète](#config_actionsjson--référence-complète)
+6. [Formulaires pilotés par la config](#formulaires-pilotés-par-la-config--fields_meta-et-fields)
+7. [plugin-core — types partagés (FFI)](#plugin-core--types-partagés-ffi)
+8. [Règles critiques FFI cdylib (runtime et pool par plugin)](#règles-critiques-ffi-cdylib)
+9. [Helpers Handlebars](#helpers-handlebars-srchelpers_hbsrs)
+10. [Sécurité](#sécurité-srcapp_securityrs)
+11. [Authentification](#authentification-plugin_auth)
+12. [Upload de fichiers](#upload-de-fichiers)
+13. [Health check, MQTT, Chart.js, eBPF](#health-check-plugin_health)
+14. [Variables d'environnement](#variables-denvironnement-env)
+15. [Compilation, lancement et déploiement (systemd)](#compilation-et-lancement)
+16. [Tests de charge et de concurrence](#tests-de-charge-et-de-concurrence)
+17. [Performances](#performances-release-localhost)
 
 ---
 
@@ -15,8 +38,8 @@ NB : Small-Folks est développé pour un usage pédagogique, il n'est pas utilis
 | Composant | Version | Rôle |
 |---|---|---|
 | Rust | 2021 edition | langage |
-| Tide | 0.16 | serveur HTTP async |
-| Tokio | 1 | runtime async multi-thread |
+| Tide | 0.16 | serveur HTTP async (exécuteur async-std) |
+| Tokio | 1 | runtime async multi-thread (un par plugin + un pour le binaire) |
 | sqlx | 0.7 | accès MySQL, requêtes préparées |
 | mongodb | 3.5 | driver MongoDB zero-copy (RawDocumentBuf) |
 | Handlebars | 6.4 | templates HTML avec partials |
@@ -49,14 +72,17 @@ small-folks/
 │   ├── app_security.rs              ← protections XSS, open redirect, header injection
 │   ├── helpers_hbs.rs               ← helpers Handlebars personnalisés
 │   ├── mqtt_worker.rs               ← client MQTT de fond (stockage capteurs)
-│   └── ebpf_worker.rs               ← firewall XDP userspace (optionnel, nécessite sudo)
+│   └── ebpf_worker.rs               ← firewall XDP userspace (optionnel, nécessite root/capabilities)
 ├── ebpf-firewall/                   ← programme XDP kernel (crate séparée, bpfel-unknown-none)
 │   ├── Cargo.toml
 │   ├── rust-toolchain.toml          ← nightly + rust-src (requis pour bpfel-unknown-none)
 │   ├── .cargo/config.toml           ← cible bpfel-unknown-none + build-std=core
 │   └── src/main.rs                  ← programme XDP : comptage SYN + DROP blacklist
 ├── plugins/                         ← tous les plugins en edition 2021
-│   ├── plugin-core/src/lib.rs       ← traits, types partagés (FFI) + named_to_positional
+│   ├── plugin-core/
+│   │   └── src/
+│   │       ├── lib.rs               ← traits, types partagés (FFI) + named_to_positional
+│   │       └── db.rs                ← runtime Tokio + pool MySQL PROPRES À CHAQUE PLUGIN
 │   ├── plugin_sql/src/lib.rs        ← SQL générique + ressources + form
 │   ├── plugin_mongo/src/lib.rs      ← MongoDB avec MongoContext autonome
 │   ├── plugin_auth/src/lib.rs       ← login / logout / JWT / sessions
@@ -113,9 +139,10 @@ Dispatcher
   ├─ vérification auth (si "auth": true dans config)
   │     → session cache → OK ou 401/redirect /login
   ↓
-plugin_sql.execute(ctx, state)        ← synchrone (contrainte FFI cdylib)
-  ├─ block_in_place + handle.block_on
-  ├─ requête principale (ctx.sql)
+spawn_blocking → plugin_sql.execute(ctx, state)   ← synchrone (contrainte FFI cdylib),
+  │                                                  sur un thread du pool bloquant
+  ├─ plugin_core::db::sql_ctx()       ← runtime + pool PROPRES au plugin
+  ├─ rt.block_on(requête principale ctx.sql)
   ├─ requêtes ressources (ctx.sql_resources) si data_resources défini
   │     → enrichissement avec { val, label, selected } par option
   └─ PluginResult::Data(json)
@@ -144,6 +171,8 @@ Le `Dispatcher` (`src/dispatcher.rs`) possède trois éléments : l'annuaire des
 
 Une action sans clé `plugin` ni `sql` reste possible : le dispatcher construit alors lui-même un formulaire à partir de la clé `fields` (voir plus bas).
 
+> **Concurrence** : `Plugin::execute` est synchrone. Le dispatcher l'exécute dans `spawn_blocking` (pool bloquant de tokio) pour ne pas bloquer les threads de Tide. Voir [Threads et cycle de vie](#threads-et-cycle-de-vie).
+
 ### Enveloppe des données avant le rendu
 
 Avant d'appeler Handlebars, le dispatcher normalise ce que le plugin a renvoyé :
@@ -154,6 +183,10 @@ Avant d'appeler Handlebars, le dispatcher normalise ce que le plugin a renvoyé 
 | Objet personnalisé (health, auth) | passe intact |
 | Objet qui contient déjà une clé `data` (formGeneric enrichi) | passe intact |
 | Action avec `form_action` | injection de `form_action`, `form_columns` et des champs pleine largeur dans l'enveloppe |
+
+### Redirection après login et paramètre `next`
+
+Après un login réussi, la cible est `LOGIN_REDIRECT` si `next` est vide, sinon `sanitize_redirect(next)`. Une valeur comme `//youtube.com`, `http://...`, `\evil` ou `javascript:...` est refusée et remplacée par `/` (voir [Sécurité](#sécurité-srcapp_securityrs)).
 
 ---
 
@@ -240,6 +273,10 @@ Sans `row_link` dans la config → `row_link: ""` → `{{#if row_link}}` est fal
 - Mode `insert_XXX` → valeurs vides → `selected: false` partout → "-- choisir --" affiché
 - Mode `update_XXX` → `selected: true` sur l'option correspondant à la valeur courante
 
+Le mode (`insert` / `update`) est détecté par le JavaScript de `formGeneric.hbs` à partir du **chemin** de `form_action` (`new URL(form.action).pathname`), il ne dépend donc ni du port ni du nom de domaine.
+
+Quand le formulaire contient un champ fichier, le même script ajoute automatiquement `enctype="multipart/form-data"` à la balise `<form>` (sinon `plugin_sql_upload` reçoit du `application/x-www-form-urlencoded` et répond *« Content-Type multipart/form-data sans boundary »*). Un formulaire sans champ fichier garde l'encodage par défaut, que `plugin_sql` sait lire.
+
 ---
 
 ## Formulaires pilotés par la config : `fields_meta` et `fields`
@@ -314,7 +351,7 @@ La route `POST` associée reste une action `plugin_sql` classique :
 ### Points d'attention
 
 - En mode `insert_XXX`, le script de `formGeneric.hbs` vide les champs texte : une `value` par défaut y est effacée.
-- Un champ `file` demande `enctype="multipart/form-data"` et une route `plugin_sql_upload`.
+- Un champ `file` demande `enctype="multipart/form-data"` (ajouté automatiquement par le script) et une route `plugin_sql_upload`.
 - Serde ignore silencieusement les clés inconnues : une faute (`field` au lieu de `fields`) ne produit aucune erreur.
 - Toute modification de `dispatcher.rs` exige `cargo build --release --all` puis un redémarrage ; `config_actions.json` et les `.hbs` ne demandent qu'un redémarrage.
 - Pour conserver l'ordre des colonnes SQL dans `fields_meta`, activer `serde_json = { version = "1", features = ["preserve_order"] }`.
@@ -370,6 +407,154 @@ pub fn named_to_positional(
 ) -> (String, Vec<String>)
 ```
 
+### `plugin_core::db` — runtime et pool MySQL propres à chaque plugin
+
+```rust
+pub struct SqlContext { pub rt: Runtime, pub pool: MySqlPool }
+
+// Un contexte par plugin (chaque .so a sa propre copie de la static)
+pub fn sql_ctx() -> Result<&'static SqlContext, String>
+```
+
+- Initialisation **paresseuse** (`OnceLock`) au premier appel, à partir de `DATABASE_URL`.
+- Runtime Tokio multi-thread à **2 workers** (`plugin-sql-rt`).
+- Pool sqlx limité par `PLUGIN_DB_MAX_CONNECTIONS` (défaut **5**), `acquire_timeout` de 5 s, `SET NAMES utf8mb4` à chaque connexion.
+- Dépendance dans `plugin-core/Cargo.toml` : `tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "net"] }` et `pub mod db;` dans `plugin-core/src/lib.rs`.
+
+---
+
+## Règles critiques FFI cdylib
+
+### Edition Rust
+```
+Cargo.toml principal (binaire small-folks) → edition = "2024"
+Cargo.toml des plugins (cdylib)            → edition = "2021"
+```
+En edition 2024, `#[no_mangle]` devient `#[unsafe(no_mangle)]`. Les plugins restent en 2021.
+
+### Règle d'or : chaque plugin possède son runtime et son pool
+
+Chaque `.so` embarque **sa propre copie statique** de `tokio` et de `parking_lot`. Si un plugin utilise le `Handle` ou le `MySqlPool` de l'hôte (`state.handle`, `state.pool`), le code de tokio du plugin manipule des structures (verrous, files de réveil) créées par une **autre copie** de tokio. Sous charge, des réveils sont perdus et le serveur se fige : timeouts, `Bad Gateway` derrière nginx, threads Tide tous bloqués dans `block_on`.
+
+Règle : **un plugin ne touche jamais au runtime ni au pool de l'hôte.** Il crée les siens, dans son propre `.so`.
+
+```rust
+// ❌ À NE PLUS FAIRE (plugin lié au runtime et au pool de l'hôte)
+tokio::task::block_in_place(|| {
+    state.handle.block_on(async {
+        sqlx::query(...).fetch_all(&state.pool).await
+    })
+})
+
+// ✅ plugin_sql, plugin_auth, plugin_upload, plugin_sql_upload, plugin_health
+let c = match plugin_core::db::sql_ctx() {
+    Ok(c)  => c,
+    Err(e) => return PluginResult::Error(e),
+};
+let pool = c.pool.clone();
+c.rt.block_on(async move {
+    sqlx::query(...).fetch_all(&pool).await
+})
+```
+
+| Plugin | Runtime | Client / pool |
+|---|---|---|
+| `plugin_sql`, `plugin_auth`, `plugin_upload`, `plugin_sql_upload` | `plugin_core::db` (2 workers) | `MySqlPool` de `plugin_core::db` |
+| `plugin_health` | `plugin_core::db` (MySQL) + `HEALTH_RT` (MongoDB) | pool `plugin_core::db` + client Mongo |
+| `plugin_mongo` | `MONGO_RT` | client MongoDB créé **dans** `MONGO_RT` |
+
+Conséquences :
+- `state` n'est plus utilisé par les plugins SQL (le paramètre devient `_state`), sauf `plugin_health` qui lit `state.sessions`.
+- Plus de `block_in_place` : `execute()` est appelé depuis un thread Tide, pas depuis un worker Tokio.
+- Le nombre total de connexions MySQL = (`PLUGIN_DB_MAX_CONNECTIONS` × nombre de plugins SQL) + pool de l'hôte. Avec 5 plugins SQL et 5 connexions chacun, prévoir au moins ~30 connexions côté MariaDB (`max_connections`).
+
+### plugin_mongo — MongoContext autonome (CRITIQUE)
+Le client MongoDB DOIT être créé dans `MONGO_RT`, pas dans `main.rs`. Sinon son heartbeat est affamé par le runtime principal → latence 1-8 s. Même principe pour `HealthContext` / `HEALTH_RT`.
+
+### Threads et cycle de vie
+
+![Schéma des threads et de leur cycle de vie](https://mascaron.net/schema_threads_small_folks.svg)
+
+Le processus contient quatre familles de threads :
+
+| Famille | Threads | Rôle | Durée de vie |
+|---|---|---|---|
+| **Tide (async-std)** | un par cœur (`ASYNC_GLOBAL_EXECUTOR_THREADS` pour changer) | accepter la connexion, résoudre la route, vérifier l'auth, lire le body, rendre la réponse | créés au premier `spawn`, jusqu'à l'arrêt |
+| **Pool bloquant de tokio (hôte)** | à la demande (512 max par défaut) | exécuter `plugin.execute()`, code **synchrone** du `.so` | créés selon la charge, détruits après ~10 s d'inactivité |
+| **Runtime de chaque plugin** | 2 workers par runtime (`plugin_core::db`, `MONGO_RT`, `HEALTH_RT`) | E/S asynchrones vers MySQL / MongoDB | créés au premier appel du plugin (`OnceLock`), jusqu'à l'arrêt |
+| **Workers de fond** | tâches du runtime tokio de l'hôte | `mqtt_worker`, `ebpf_worker` (boucle de 5 s) | démarrés au lancement si activés |
+
+Trajet d'une requête : Tide reçoit et prépare la requête → le dispatcher confie `plugin.execute()` au pool bloquant avec `spawn_blocking(...).await` → ce thread bloquant attend, via `rt.block_on`, le runtime propre au plugin qui interroge la base → le résultat remonte, le thread Tide reprend la requête, rend la vue et répond.
+
+#### Pourquoi `spawn_blocking` dans le dispatcher
+
+`Plugin::execute` est synchrone (contrainte FFI). Appelé directement depuis Tide, il bloquerait un des threads de l'exécuteur async-std pendant toute la requête : sur un petit VPS (2 cœurs), deux requêtes lentes suffiraient à figer le serveur. Le dispatcher exécute donc le plugin dans le pool bloquant de tokio :
+
+```rust
+let plugin  = Arc::clone(plugin);          // plugins: HashMap<String, Arc<dyn Plugin>>
+let state   = req.state().clone();
+let handle  = state.handle.clone();        // Handle du runtime tokio de l'hôte
+let ctx_job = ctx.clone();
+let result = match handle
+    .spawn_blocking(move || plugin.execute(&ctx_job, &state))
+    .await
+{
+    Ok(r)  => r,
+    Err(e) => { /* le plugin a paniqué */ return self.render_error(500, "Erreur interne du plugin"); }
+};
+```
+
+Conséquences :
+- Les threads Tide ne restent occupés que pour le rendu : `ASYNC_GLOBAL_EXECUTOR_THREADS` n'est plus nécessaire.
+- La concurrence est limitée par les pools de connexions des plugins (`PLUGIN_DB_MAX_CONNECTIONS`, 5 par défaut), plus par le nombre de cœurs.
+- Une panique dans un plugin produit une réponse `500` au lieu de perdre un thread du serveur.
+- `ctx.clone()` copie aussi `body_bytes` : pour un upload de 10 Mo, une copie de 10 Mo par requête.
+- Il n'y a pas de rechargement à chaud des `.so` : recompiler un plugin impose de redémarrer le serveur (le remplacer pendant qu'il tourne peut le faire planter).
+
+### named_to_positional — fonction partagée dans plugin-core
+```rust
+// Dans tous les plugins qui exécutent du SQL :
+let (sql_prepared, values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
+```
+Ne pas dupliquer — `regex = "1"` dans `plugin-core/Cargo.toml` suffit.
+
+### Règles SQL
+- Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(id AS CHAR)`, `CAST(COUNT(*) AS CHAR)`
+- Paramètres nommés `:param` → convertis automatiquement en `?` positionnels
+- `plugin_auth` utilise `ctx.sql` — requête définie dans `config_actions.json`
+
+### Où sont définies les requêtes SQL ?
+
+Les requêtes SQL ne sont pas écrites en dur dans le code Rust. Elles sont
+externalisées dans `config_actions.json` : chaque action (route) possède un
+champ `"sql"` contenant la requête, avec des paramètres nommés `:param`.
+
+Le dispatcher lit cette configuration, puis le plugin (`plugin_sql`, `plugin_auth`)
+exécute la requête fournie dans son contexte (`ctx.sql`). Les paramètres nommés
+sont convertis en `?` positionnels par `plugin_core::named_to_positional`.
+
+Modifier une requête SQL ne demande donc aucune recompilation du plugin : un simple
+redémarrage du serveur suffit. Les fichiers du dossier `sql/` servent uniquement à
+créer les tables (`create_*.sql`), pas à définir les requêtes des actions.
+
+Exemple :
+
+```json
+"GET/capteurs/chart/:sensor_id": {
+    "plugin": "./target/release/libplugin_sql.so",
+    "sql": "SELECT ... FROM capteurs WHERE sensor_id = :sensor_id",
+    "view": "specifics/chart_capteurs.hbs"
+}
+```
+
+### Templates Handlebars Rust
+- `{{this}}` et non `{{.}}`
+- `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers
+- `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{label}}`, `{{#if fullwidth}}` pour `formGeneric`
+- `{{#each (lookup @root.resources key)}}` + `{{val}}`, `{{label}}`, `{{#if selected}}` pour les selects
+- `../../../@key` interdit — Handlebars Rust ne supporte pas la remontée profonde
+- `enctype="multipart/form-data"` obligatoire sur les formulaires upload (guillemet fermant !)
+
 ---
 
 ## Helpers Handlebars (src/helpers_hbs.rs)
@@ -413,82 +598,45 @@ Côté Rust, ce helper est une structure `CompareHelper` qui implémente `Helper
 
 | Fonction | Protège contre | Exemple |
 |---|---|---|
-| `sanitize_redirect(url)` | Open Redirect | `http://evil.com` → `/` |
+| `sanitize_redirect(url)` | Open Redirect | `http://evil.com`, `//evil.com`, `/\evil.com` → `/` |
 | `sanitize_header(val)` | Header Splitting | `val\r\nX-Evil:` → `valX-Evil:` |
 | `sanitize_log(msg)` | Log Injection | `msg\n[FAKE]` → `msg [FAKE]` |
 | `sanitize_html(input)` | XSS hors-template | `<script>` → `&lt;script&gt;` |
 
-Tests unitaires : `cargo test -p small-folks`
+### Open Redirect (paramètre `next`)
 
----
+`/login?next=//youtube.com` était accepté par une version antérieure (une URL qui commence par `//` est interprétée par le navigateur comme une URL absolue de même schéma). `sanitize_redirect` :
 
-## Règles critiques FFI cdylib
+1. supprime les caractères de contrôle (`\t`, `\r`, `\n`... que les navigateurs ignorent dans une URL) ;
+2. exige une URL **relative** qui commence par `/` et pas par `//` ;
+3. refuse le backslash (`/\evil.com` est normalisé en `//evil.com` par les navigateurs), les `:` (schémas `javascript:`, `data:`), `<script` ;
+4. renvoie `/` dans tous les autres cas et journalise la tentative.
 
-### Edition Rust
-```
-Cargo.toml principal (binaire small-folks) → edition = "2024"
-Cargo.toml des plugins (cdylib)            → edition = "2021"
-```
-En edition 2024, `#[no_mangle]` devient `#[unsafe(no_mangle)]`. Les plugins restent en 2021.
-
-### plugin_sql — block_in_place + handle.block_on
 ```rust
-tokio::task::block_in_place(|| {
-    state.handle.block_on(async {
-        sqlx::query(...).fetch_all(&state.pool).await
-    })
-})
-```
-
-### plugin_mongo — MongoContext autonome (CRITIQUE)
-Le client MongoDB DOIT être créé dans `MONGO_RT`, pas dans `main.rs`.
-Sinon `block_in_place` de `plugin_sql` affame le heartbeat MongoDB → latence 1-8s.
-
-**La même règle s'applique à `plugin_health`** (`HealthContext` + `HEALTH_RT`) et à **`plugin_sql_upload`** (`OnceLock<Runtime>` dédié).
-
-### named_to_positional — fonction partagée dans plugin-core
-```rust
-// Dans tous les plugins qui exécutent du SQL :
-let (sql_prepared, values) = plugin_core::named_to_positional(&ctx.sql, &ctx.params);
-```
-Ne pas dupliquer — `regex = "1"` dans `plugin-core/Cargo.toml` suffit.
-
-### Règles SQL
-- Toutes les colonnes doivent être `CHAR`/`VARCHAR` ou castées : `CAST(id AS CHAR)`, `CAST(COUNT(*) AS CHAR)`
-- Paramètres nommés `:param` → convertis automatiquement en `?` positionnels
-- `plugin_auth` utilise `ctx.sql` — requête définie dans `config_actions.json`
-
-### Où sont définies les requêtes SQL ?
-
-Les requêtes SQL ne sont pas écrites en dur dans le code Rust. Elles sont
-externalisées dans `config_actions.json` : chaque action (route) possède un
-champ `"sql"` contenant la requête, avec des paramètres nommés `:param`.
-
-Le dispatcher lit cette configuration, puis le plugin (`plugin_sql`, `plugin_auth`)
-exécute la requête fournie dans son contexte (`ctx.sql`). Les paramètres nommés
-sont convertis en `?` positionnels par `plugin_core::named_to_positional`.
-
-Modifier une requête SQL ne demande donc aucune recompilation du plugin : un simple
-redémarrage du serveur suffit. Les fichiers du dossier `sql/` servent uniquement à
-créer les tables (`create_*.sql`), pas à définir les requêtes des actions.
-
-Exemple :
-
-```json
-"GET/capteurs/chart/:sensor_id": {
-    "plugin": "./target/release/libplugin_sql.so",
-    "sql": "SELECT ... FROM capteurs WHERE sensor_id = :sensor_id",
-    "view": "specifics/chart_capteurs.hbs"
+pub fn sanitize_redirect(url: &str) -> String {
+    let cleaned: String = url.chars().filter(|c| !c.is_control()).collect();
+    let url = cleaned.trim();
+    if url.is_empty() { return "/".to_string(); }
+    let lower = url.to_lowercase();
+    let is_safe = url.starts_with('/') && !url.starts_with("//") && !url.contains('\\')
+        && !lower.contains(':') && !lower.contains("javascript") && !lower.contains("<script");
+    if is_safe { url.to_string() } else {
+        eprintln!("[security] Open Redirect bloqué : '{}'", sanitize_log(url));
+        "/".to_string()
+    }
 }
 ```
 
-### Templates Handlebars Rust
-- `{{this}}` et non `{{.}}`
-- `{{#each data}}{{#if @first}}{{#each this}}<th>{{@key}}</th>{{/each}}{{/if}}{{/each}}` pour les headers
-- `{{#each data.0.fields}}` + `{{key}}`, `{{value}}`, `{{#if fullwidth}}` pour `formGeneric`
-- `{{#each (lookup @root.resources key)}}` + `{{val}}`, `{{label}}`, `{{#if selected}}` pour les selects
-- `../../../@key` interdit — Handlebars Rust ne supporte pas la remontée profonde
-- `enctype="multipart/form-data"` obligatoire sur les formulaires upload (guillemet fermant !)
+### Pistes de durcissement (hors périmètre pédagogique actuel)
+
+- Hachage des mots de passe (argon2/bcrypt) au lieu de la comparaison SQL directe.
+- Attributs `Secure`, `HttpOnly` et `SameSite=Lax` sur **tous** les cookies (le `jwt_token` n'a aujourd'hui ni `Secure` ni `HttpOnly`).
+- Limitation du nombre de tentatives de login (rate limiting), en complément du firewall XDP.
+- En-têtes de sécurité (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`).
+- Limite de taille du corps des requêtes et masquage des messages d'erreur SQL côté client.
+- Alerte au démarrage pour les routes d'écriture (`POST`) sans `"auth": true`.
+
+Tests unitaires : `cargo test -p small-folks`
 
 ---
 
@@ -498,7 +646,7 @@ Exemple :
 
 L'authentification repose sur trois opérations de `plugin_auth`, choisies par le champ `operation` de l'action : `login`, `logout` et `me`.
 
-1. **Login** : le plugin exécute la requête `ctx.sql` de l'action (voir plus bas) avec le `login` et le mot de passe reçus. Si une ligne est trouvée, il génère un **JWT** signé en HS256 (clé `JWT_SECRET`) et un identifiant de session. Il renvoie `AuthSuccess`, et le dispatcher pose deux cookies : `session_id` (en `HttpOnly`, donc inaccessible à JavaScript) et `jwt_token`. Si aucune ligne n'est trouvée, `AuthError` redirige vers `/login?error=1`.
+1. **Login** : le plugin exécute la requête `ctx.sql` de l'action (voir plus bas) avec le `login` et le mot de passe reçus (champs de formulaire `login` et `mdp`). Si une ligne est trouvée, il génère un **JWT** signé en HS256 (clé `JWT_SECRET`) et un identifiant de session. Il renvoie `AuthSuccess`, et le dispatcher pose deux cookies : `session_id` (en `HttpOnly`, donc inaccessible à JavaScript) et `jwt_token`. Si aucune ligne n'est trouvée, `AuthError` redirige vers `/login?error=1`.
 2. **Sessions** : elles sont conservées en mémoire du serveur (`Arc<Mutex<HashMap>>`) et expirent après `SESSION_TTL_SECONDS`. Un redémarrage du serveur les efface donc toutes.
 3. **Contrôle d'accès** : pour toute action portant `"auth": true`, le dispatcher lit le cookie `session_id` (injecté dans `ctx.params`) et vérifie qu'il correspond à une session non expirée. Sinon, il refuse l'accès ou redirige vers `/login`.
 4. **Logout** : `AuthLogout` supprime la session et redirige vers `redirect_to`.
@@ -532,18 +680,39 @@ Avec Tide, plusieurs cookies dans une même réponse se posent avec `insert_head
 
 > **⚠️ Mots de passe bcrypt** : la comparaison SQL directe ne fonctionne pas avec `password_hash()`.
 
+### Tester le login avec curl
+
+```bash
+# 1. Se connecter et stocker les cookies dans un fichier (-c)
+read -s -p "Mot de passe : " PW; echo
+curl -i -c /tmp/cj -d "login=steph" --data-urlencode "mdp=$PW" http://localhost:8080/login
+#   → 303 + Location: /index + Set-Cookie: session_id=... et jwt_token=...
+#   → 303 + Location: /login?error=1 si les identifiants sont faux
+
+# 2. Réutiliser la session (-b) sur une route protégée
+curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" -b /tmp/cj http://localhost:8080/users
+#   → 200 si la session est valide, 303 vers /login sinon
+
+# 3. Nettoyer
+rm /tmp/cj
+```
+
+Un cookie marqué `Secure` n'est renvoyé par curl qu'en HTTPS. Les noms des champs (`login`, `mdp`) sont ceux de `templates/generics/login.hbs`. Les sessions sont en mémoire du serveur : après un redémarrage, il faut se reconnecter.
+
 ---
 
 ## Encodage UTF-8
 
 Deux points garantissent que les accents et caractères spéciaux traversent correctement le framework :
 
-- **Connexion MySQL** : le pool sqlx exécute `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci` à chaque nouvelle connexion (`after_connect`).
+- **Connexion MySQL** : chaque pool sqlx (hôte et plugins) exécute `SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci` à chaque nouvelle connexion (`after_connect`).
 - **Données de formulaire** : `urlencoding_decode` accumule les octets décodés dans un `Vec<u8>`, puis les convertit en une seule fois avec `String::from_utf8_lossy`. Convertir octet par octet (`byte as char`) corromprait les caractères sur plusieurs octets (é, à, €...).
 
 ---
 
 ## Upload de fichiers
+
+Les deux plugins d'upload utilisent `plugin_core::db` (runtime et pool propres au plugin), comme `plugin_sql`.
 
 ### plugin_upload — upload autonome
 
@@ -581,6 +750,22 @@ UPDATE users SET name=:name, image=COALESCE(NULLIF(:image,''), image) WHERE id=:
 
 Le dossier `uploads/` doit exister au démarrage, car il est servi par `serve_dir`. Comme Git ne versionne pas les dossiers vides, ajoutez un fichier `uploads/.gitkeep`.
 
+Derrière nginx, `client_max_body_size` (1 Mo par défaut) doit être au moins égal à `max_size_mb`, sinon la réponse est `413`.
+
+Si un formulaire poste vers une route `plugin_sql_upload` sans `enctype="multipart/form-data"`, le plugin répond *« Content-Type multipart/form-data sans boundary »* : le navigateur a envoyé du `application/x-www-form-urlencoded`, qui n'a pas de boundary.
+
+### Tester un upload avec curl
+
+```bash
+# Le nom du champ (file) doit être celui de la route ; le fichier doit exister sur la machine qui lance curl
+for i in $(seq 1 20); do
+  curl -s -o /dev/null --max-time 10 -b /tmp/cj \
+    -w "%{http_code} %{redirect_url}\n" \
+    -F "file=@/tmp/t.png;type=image/png" http://localhost:8080/upload &
+done | sort | uniq -c; wait
+#   → 20 × "303 .../uploads" attendu. 000 = fichier local introuvable ou serveur bloqué.
+```
+
 ---
 
 ## Health check (plugin_health)
@@ -590,7 +775,7 @@ GET /health              → JSON brut
 GET /health/dashboard    → HTML dashboard (auth: true conseillé)
 ```
 
-`plugin_health` utilise `HealthContext` avec `HEALTH_RT` autonome — même pattern que `plugin_mongo`.
+`plugin_health` combine deux contextes autonomes : le ping **MySQL** passe par `plugin_core::db` (runtime et pool propres au plugin) et le ping **MongoDB** par `HealthContext` / `HEALTH_RT`. Aucun des deux n'utilise le runtime ou le pool de l'hôte. Il lit aussi `state.sessions` pour les statistiques de sessions.
 
 ---
 
@@ -680,7 +865,7 @@ Paquet réseau entrant (NIC)
   └─ Sinon                     → XDP_PASS
          ↕ BPF Maps (mémoire partagée kernel ↔ userspace)
 [ebpf_worker] ← tourne en userspace (Tokio, toutes les 5s)
-  ├─ Lit STATS  → logs
+  ├─ Lit STATS  → logs (toutes les EBPF_STATS_LOG_SECS secondes)
   ├─ Sync BLACKLIST → MySQL (ebpf_blacklist)
   └─ Auto-débloque les IPs expirées
 ```
@@ -702,7 +887,7 @@ Dans le programme kernel, une map de type `Array` n'offre ni `set()` ni `insert(
 ```bash
 # Prérequis
 rustup component add rust-src
-cargo install bpf-linker
+cargo binstall bpf-linker        # (cargo install bpf-linker exige llvm-config : préférer cargo-binstall)
 
 # Compiler le programme kernel (depuis ebpf-firewall/)
 cd ebpf-firewall
@@ -733,13 +918,16 @@ EBPF_PROGRAM=./ebpf-firewall/target/bpfel-unknown-none/release/ebpf-firewall
 EBPF_RATE_LIMIT=100
 EBPF_WINDOW_SECS=60
 EBPF_AUTO_UNBLOCK_SECS=300
+EBPF_STATS_LOG_SECS=60     # 0 = ne jamais afficher les statistiques périodiques
 
 # Lancer avec les droits nécessaires
 sudo ./target/release/small-folks
-# ou
-sudo setcap cap_bpf,cap_net_admin+eip ./target/release/small-folks
-./target/release/small-folks
 ```
+
+**Droits nécessaires** : chargement d'un programme XDP et création des maps BPF.
+- Noyau **≥ 5.8** : `CAP_BPF` + `CAP_NET_ADMIN` (+ `CAP_PERFMON`) suffisent.
+- Noyau **< 5.8** (ex. Ubuntu 20.04, noyau 5.4) : `CAP_BPF` n'existe pas, il faut `CAP_SYS_ADMIN` + `CAP_NET_ADMIN`, ou root.
+- Sous systemd, l'erreur `failed to create map BLACKLIST with code -1` vient d'une limite `RLIMIT_MEMLOCK` trop basse : ajouter `LimitMEMLOCK=infinity` à l'unité.
 
 ### Table MySQL ebpf_blacklist
 
@@ -781,7 +969,7 @@ Tide / MySQL : aucun impact pendant l'attaque
 ## Variables d'environnement (.env)
 
 ```bash
-HOST=0.0.0.0
+HOST=0.0.0.0                 # adresse d'écoute : 0.0.0.0 = toutes les interfaces, 127.0.0.1 = local seul
 PORT=8080
 CONFIG_ACTIONS=./config_actions.json
 TEMPLATES_DIR=./templates
@@ -796,6 +984,11 @@ JWT_SECRET=chaine-secrete-32-chars-minimum
 SESSION_TTL_SECONDS=3600
 LOGIN_REDIRECT=/index
 
+# Pools et threads
+PLUGIN_DB_MAX_CONNECTIONS=5          # connexions MySQL PAR plugin SQL (défaut : 5)
+# ASYNC_GLOBAL_EXECUTOR_THREADS=4    # optionnel : threads de l'exécuteur Tide (défaut : nb de cœurs).
+#                                    # Peu utile depuis spawn_blocking dans le dispatcher.
+
 # MQTT (optionnel)
 # MQTT_BROKER_URL=localhost
 # MQTT_BROKER_PORT=1883
@@ -803,18 +996,32 @@ LOGIN_REDIRECT=/index
 # MQTT_TOPICS=sensors/#
 # MQTT_QOS=1
 
-# eBPF Firewall XDP (optionnel — nécessite sudo ou CAP_BPF + kernel ≥ 5.8)
+# eBPF Firewall XDP (optionnel — root ou capabilities, voir la section eBPF)
 # EBPF_ENABLED=true
 # EBPF_INTERFACE=eth0
 # EBPF_PROGRAM=./ebpf-firewall/target/bpfel-unknown-none/release/ebpf-firewall
 # EBPF_RATE_LIMIT=100
 # EBPF_WINDOW_SECS=60
 # EBPF_AUTO_UNBLOCK_SECS=300
+# EBPF_STATS_LOG_SECS=60
 ```
+
+Le serveur est joignable depuis l'extérieur si `HOST=0.0.0.0` (ou l'IP publique) et si le port est ouvert dans le pare-feu. Derrière nginx, préférer `HOST=127.0.0.1`.
 
 ---
 
 ## Compilation et lancement
+
+### Prérequis (Ubuntu / Debian)
+
+```bash
+sudo apt install build-essential pkg-config libssl-dev    # openssl-sys
+# eBPF (optionnel) :
+rustup toolchain install nightly && rustup component add rust-src --toolchain nightly
+cargo install cargo-binstall && cargo binstall bpf-linker
+```
+
+### Compiler et lancer
 
 ```bash
 # Compiler tous les plugins + le binaire
@@ -830,8 +1037,98 @@ cd ebpf-firewall && cargo build --release && cd ..
 sudo ./target/release/small-folks
 ```
 
-Les `.so` dans `config_actions.json` doivent pointer vers `./target/release/`.
-Mélanger binaire release et `.so` debug provoque un coredump.
+- Les `.so` dans `config_actions.json` doivent pointer vers `./target/release/`. Mélanger binaire release et `.so` debug provoque un coredump.
+- **Arrêter le serveur avant de recompiler** : remplacer un `.so` chargé par un serveur en marche peut le faire planter.
+- Modification de code Rust (`src/`, `plugins/`) → recompilation obligatoire. Modification de `config_actions.json` ou d'un `.hbs` → simple redémarrage.
+
+### Service systemd
+
+`/etc/systemd/system/small-folks.service` :
+
+```ini
+[Unit]
+Description=small-folks (framework Rust / Tide)
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/small-folks
+ExecStart=/opt/small-folks/target/release/small-folks
+Restart=on-failure
+RestartSec=3
+User=root
+LimitNOFILE=65535
+LimitMEMLOCK=infinity
+# Sans root, noyau >= 5.8 :
+# AmbientCapabilities=CAP_BPF CAP_NET_ADMIN CAP_PERFMON
+# Sans root, noyau 5.4 :
+# AmbientCapabilities=CAP_SYS_ADMIN CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`User=root` est nécessaire si l'eBPF est activé et qu'aucune capability n'est accordée. `LimitMEMLOCK=infinity` est indispensable pour les maps eBPF.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now small-folks
+journalctl -u small-folks -f
+```
+
+### Derrière nginx
+
+```nginx
+location / {
+    proxy_pass         http://127.0.0.1:8080;
+    proxy_set_header   Host $host;
+    proxy_set_header   X-Real-IP $remote_addr;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    client_max_body_size 10m;      # ≥ max_size_mb des uploads
+}
+```
+
+---
+
+## Tests de charge et de concurrence
+
+Procédure utilisée pour valider le modèle « un runtime et un pool par plugin ».
+
+```bash
+# 20 requêtes simultanées sur une route SQL
+for i in $(seq 1 20); do
+  curl -s -o /dev/null --max-time 10 -w "%{http_code} %{time_total}s\n" http://localhost:8080/users &
+done; wait
+
+# 200 requêtes, comptage des codes HTTP
+for i in $(seq 1 200); do curl -s -o /dev/null --max-time 10 -w "%{http_code}\n" http://localhost:8080/users & done | sort | uniq -c; wait
+
+# Mélange de routes (SQL, login, health)
+for i in $(seq 1 200); do
+  curl -s -o /dev/null --max-time 10 -w "%{http_code}\n" http://localhost:8080/users &
+  curl -s -o /dev/null --max-time 10 -w "%{http_code}\n" -d "login=x" -d "mdp=y" http://localhost:8080/login &
+done | sort | uniq -c; wait
+```
+
+| Scénario | Avant correctif | Après correctif |
+|---|---|---|
+| 20 × `/users` en parallèle (VPS 2 cœurs) | 2 réponses sur 20, le reste en timeout | 20 × `200` |
+| 200 × `/users`, `/login`, `/health` | blocage / `Bad Gateway` | 100 % de succès |
+| 600 requêtes mélangées | — | 600 / 600 |
+| 20 × `/users` via nginx + HTTPS | — | 20 × `200`, 0,29–0,45 s |
+| 20 × `POST /upload` avec session | — | 20 × `303` vers `/uploads` |
+
+**Lecture des codes** : `000` = pas de réponse HTTP (serveur arrêté, requête bloquée, ou fichier local introuvable avec `-F file=@...`) ; `303` vers `/login` = session absente ; `413` = `client_max_body_size` nginx trop bas ; `502/504` = serveur bloqué derrière nginx.
+
+**Diagnostiquer un blocage** : pendant que les requêtes sont en attente, capturer les piles de tous les threads.
+
+```bash
+sudo gdb -p $(pgrep -f target/release/small-folks | head -1) -batch \
+  -ex "set pagination off" -ex "thread apply all bt" > /tmp/gdb_trace.txt 2>&1
+```
+
+Des threads `async-std` tous bloqués dans `block_on` / `parking_lot` sont le signe d'un plugin qui partage le runtime ou le pool de l'hôte.
 
 ---
 
